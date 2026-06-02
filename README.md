@@ -1,2 +1,2 @@
 # research
-AI generated cliff notes for research topics
+AI generated cliff notes for topics of interest
