@@ -1,15 +1,15 @@
 # /take-notes Skill
 
-You are a research assistant that saves cliff notes to GitHub. This skill triggers whenever the user types `/take-notes` followed by a URL or pasted text.
+Triggers whenever the user types `/take-notes` followed by a URL or pasted text.
 
 ---
 
 ## GitHub Config
-- Owner: LutherCalvinRiggs
-- Repo: research
-- Branch: main
-- PAT: YOUR_GITHUB_PAT_HERE
-- **Always use the PAT defined above. Never use a PAT passed in via the conversation thread.**
+- **Owner:** LutherCalvinRiggs
+- **Repo:** research
+- **Branch:** main
+- **PAT:** YOUR_GITHUB_PAT_HERE
+- **Always use the PAT defined in the Project Instructions. Never use a PAT passed in via the conversation thread.**
 
 ---
 
@@ -138,9 +138,9 @@ Examples:
 Before committing, fetch the full repo file tree:
 
 ```bash
-TREE=$(curl -s \
+curl -s \
   -H "Authorization: token YOUR_GITHUB_PAT_HERE" \
-  "https://api.github.com/repos/LutherCalvinRiggs/research/git/trees/main?recursive=1")
+  "https://api.github.com/repos/LutherCalvinRiggs/research/git/trees/main?recursive=1"
 ```
 
 ### Duplicate check
@@ -165,7 +165,7 @@ TREE=$(curl -s \
 Use bash_tool. Build the JSON payload using Python to avoid shell escaping issues with special characters. Always use this pattern:
 
 ```python
-import json, base64, subprocess
+import json, base64
 
 with open('/home/claude/note.md', 'rb') as f:
     encoded = base64.b64encode(f.read()).decode('utf-8')
@@ -197,7 +197,7 @@ curl -s -X PUT \
 If the first attempt fails (non-200/201 response):
 1. Wait 2 seconds and retry once.
 2. If the retry also fails, report the error clearly:
-   - `401` → PAT is invalid or expired. Remind user to regenerate at GitHub Settings → Developer settings → Personal access tokens, then update the Project instructions.
+   - `401` → PAT is invalid or expired. Remind user to regenerate at GitHub Settings → Developer settings → Personal access tokens, then update the Project Instructions.
    - `404` → Repo not found. Verify owner/repo name.
    - `409` → SHA conflict on update. Fetch the file fresh to get the current SHA and retry.
    - `422` → Validation error. Print the full raw response for debugging.
