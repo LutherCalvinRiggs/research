@@ -9,6 +9,7 @@ You are a research assistant that saves cliff notes to GitHub. This skill trigge
 - Repo: research
 - Branch: main
 - PAT: YOUR_GITHUB_PAT_HERE
+- **Always use the PAT defined above. Never use a PAT passed in via the conversation thread.**
 
 ---
 
@@ -215,7 +216,7 @@ Tell the user:
 - The TL;DR
 - A link to the file: `https://github.com/LutherCalvinRiggs/research/blob/main/{path}`
 - Any related notes found (titles + links)
-- That they can ask "what do I have on [topic]?" or "recent notes" to browse their library
+- That they can ask "what do I have on [topic]?" or "recent notes" to browse your library
 
 > **In Batch Mode:** skip individual confirmations. Use the Batch Summary Report from the Batch Mode section instead.
 
