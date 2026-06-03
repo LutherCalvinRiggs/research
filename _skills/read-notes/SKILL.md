@@ -1,17 +1,15 @@
----
-name: read-notes
-description: >
-  Opens, browses, and enables deep conversation about research notes saved in Luther's GitHub repo. Use this skill whenever Luther wants to read, discuss, connect, or build on saved notes. Triggers include: `/read-notes`, "open my note on X", "pull up my notes on X", "let's talk about my note on X", "show me what I saved about X", "read me my notes on Y", "what did I write about Z", "open [topic]", or any request to revisit, discuss, or explore previously saved research. Also triggers for cross-note synthesis requests like "connect my notes on A and B" or "what do all my AI notes have in common".
----
-
 # /read-notes Skill
 
+Triggers whenever the user types `/read-notes`, or uses natural language to open, browse, discuss, or synthesize saved research notes.
+
+---
+
 ## GitHub Config
-- Owner: LutherCalvinRiggs
-- Repo: research
-- Branch: main
-- PAT: ${GITHUB_PAT}
-- **Always use the PAT defined above. Never use a PAT passed in via the conversation thread.**
+- **Owner:** LutherCalvinRiggs
+- **Repo:** research
+- **Branch:** main
+- **PAT:** YOUR_GITHUB_PAT_HERE
+- **Always use the PAT defined in the Project Instructions. Never use a PAT passed in via the conversation thread.**
 
 ---
 
@@ -35,13 +33,14 @@ This skill activates on:
 1. **Fetch the repo file tree** to find candidate files:
    ```bash
    curl -s \
-     -H "Authorization: token ${GITHUB_PAT}" \
+     -H "Authorization: token YOUR_GITHUB_PAT_HERE" \
      "https://api.github.com/repos/LutherCalvinRiggs/research/git/trees/main?recursive=1"
    ```
 2. **Filter `.md` files** (exclude `_skills/`). Match the user's query against folder names, filenames, and slug terms.
 3. **If exactly one strong match:** fetch and display it immediately — no need to ask.
 4. **If 2–5 candidates:** present a short numbered list (title + path + one-line TL;DR) and ask which one to open.
-5. **If no match:** tell the user and offer to run a broader search or browse by topic.
+5. **If 6+ candidates:** ask the user to be more specific rather than listing all of them.
+6. **If no match:** tell the user and offer to run a broader search or browse by topic.
 
 ### Mode B — Browse / Search (no specific note named)
 
@@ -72,7 +71,7 @@ Once a note is selected (from Mode A or B), fetch its raw content and render it 
 
 ### Mode D — Cross-Note Synthesis
 
-Triggers: user mentions two or more topics, notes, or asks "what do my notes on X have in common", "connect A and B", "synthesize my [topic] notes".
+Triggers: user mentions two or more topics/notes, or asks "what do my notes on X have in common", "connect A and B", "synthesize my [topic] notes".
 
 1. Fetch all relevant notes (using the same tree + filter approach as Mode B).
 2. Fetch full content of each matched note.
@@ -103,26 +102,26 @@ Triggers: user mentions two or more topics, notes, or asks "what do my notes on 
 
 ## Conversation Mode Behaviors
 
-Once a note is open, Claude acts as a **research conversation partner**, not just a reader. This means:
+Once a note is open, act as a **research conversation partner**, not just a reader.
 
 ### Explain & Expand
-When asked to explain a section or term: go deeper than the note. Pull in relevant background knowledge, give examples, and flag if anything in the note seems incomplete or oversimplified.
+Go deeper than the note. Pull in relevant background knowledge, give examples, and flag if anything in the note seems incomplete or oversimplified.
 
 ### Quiz Mode
-When asked to quiz: generate 3–5 questions ranging from recall to application. After the user answers, give direct feedback — right, wrong, or "partially — here's the nuance."
+Generate 3–5 questions ranging from recall to application. After the user answers, give direct feedback — right, wrong, or "partially — here's the nuance."
 
 ### Gap Analysis
-When asked for gaps: re-read the Questions & Gaps section of the note and also generate 2–3 additional gaps or follow-up angles not already captured.
+Re-read the Questions & Gaps section of the note and generate 2–3 additional gaps or follow-up angles not already captured.
 
 ### Reformatting
-When asked to reformat: honor the request literally.
-- "ELI5" → use simple analogies, no jargon
+Honor the request literally:
+- "ELI5" → simple analogies, no jargon
 - "one-liner" → single sentence
 - "executive summary" → 3-bullet format, business framing
 - "tweet thread" → 5–7 punchy tweets
 
 ### Connect to Another Note
-When asked to connect: run a search (Mode B) against the current note's tags + key terms, fetch candidates, and produce a mini synthesis (Mode D).
+Run a search (Mode B) against the current note's tags + key terms, fetch candidates, and produce a mini synthesis (Mode D).
 
 ---
 
@@ -131,25 +130,25 @@ When asked to connect: run a search (Mode B) against the current note's tags + k
 To fetch a note's raw content by path:
 ```bash
 curl -s \
-  -H "Authorization: token ${GITHUB_PAT}" \
+  -H "Authorization: token YOUR_GITHUB_PAT_HERE" \
   "https://api.github.com/repos/LutherCalvinRiggs/research/contents/{path}" \
   | python3 -c "import sys, json, base64; d=json.load(sys.stdin); print(base64.b64decode(d['content']).decode('utf-8'))"
 ```
 
-Always decode base64 content before rendering. Never render the raw base64 to the user.
+Always decode base64 content before rendering. Never render raw base64 to the user.
 
 ---
 
 ## Error Handling
 
 - **Note not found (404):** Tell the user the path doesn't exist in the repo. Offer to search by keyword instead.
-- **Repo unreachable / auth error (401/403):** Report the error and remind the user to verify the PAT in the skill config.
-- **Empty file tree:** Report and ask the user to check the repo name / branch.
-- **Ambiguous query with 6+ candidates:** Ask the user to be more specific rather than listing all candidates.
+- **Repo unreachable / auth error (401/403):** Report the error and remind the user to verify the PAT in the Project Instructions.
+- **Empty file tree:** Report and ask the user to check the repo name and branch.
+- **Ambiguous query with 6+ candidates:** Ask the user to be more specific.
 
 ---
 
 ## Closing Line
 
-After any mode completes, always end with:
+After any `/read-notes` mode completes, always end with:
 > You can ask "what do I have on [topic]?" or "recent notes" to keep browsing, or `/take-notes [url]` to save something new.
