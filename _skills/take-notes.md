@@ -26,6 +26,38 @@ If a new top-level or second-level tag is clearly warranted, propose it to the u
 
 ---
 
+## Batch Mode
+
+**Triggers when** the input after `/take-notes` contains two or more non-empty lines, each being a URL or a block of pasted text.
+
+### Detection
+At the very start of Step 1, split the input on newlines and trim blank lines. If two or more items remain, enter Batch Mode. Otherwise, proceed with single-note flow.
+
+### Batch behavior
+- Process each item **sequentially**, not in parallel. This ensures each committed note is findable by the related-notes search of the next one.
+- Before starting, print a one-line plan: `Processing N notes — starting now.`
+- Show a progress indicator before each item: `[1/N] Fetching https://...`
+- Run the full Steps 1–5 pipeline for each item independently.
+- **On failure** (fetch error, paywall with no content, commit error): skip that item, log the reason, and continue to the next. Do not stop the batch.
+
+### Batch summary report
+After all items are processed, replace the per-note Step 6 confirmation with a single summary table:
+
+```
+## Batch Complete — N saved, M failed
+
+| # | Title | Path | Status |
+|---|-------|------|--------|
+| 1 | Note title | ai/prompting/slug.md | ✅ Saved |
+| 2 | Note title | ai/tools/slug.md | ✅ Merged |
+| 3 | — | — | ❌ Failed — paywalled, no preview content |
+```
+
+Below the table, list any related notes found across the batch (deduplicated), then the standard closing line:
+> You can ask "what do I have on [topic]?" or "recent notes" to browse your library.
+
+---
+
 ## Step 1 — Ingest Content
 
 **Standard URL:** fetch full page content using web_fetch.
@@ -116,6 +148,8 @@ TREE=$(curl -s \
   2. **Save as new** — append `-{YYYY-MM-DD}` to the slug and save separately.
 - If the path does not exist → proceed with create.
 
+> **In Batch Mode:** instead of pausing to ask, default to **Merge** automatically and note it in the summary table as `✅ Merged`.
+
 ### Related notes search
 - Filter the file tree for `.md` files outside `_skills/`.
 - Match against the new note's tags, title keywords, and slug terms.
@@ -182,6 +216,8 @@ Tell the user:
 - A link to the file: `https://github.com/LutherCalvinRiggs/research/blob/main/{path}`
 - Any related notes found (titles + links)
 - That they can ask "what do I have on [topic]?" or "recent notes" to browse their library
+
+> **In Batch Mode:** skip individual confirmations. Use the Batch Summary Report from the Batch Mode section instead.
 
 ---
 
