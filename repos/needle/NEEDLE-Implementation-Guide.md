@@ -676,6 +676,181 @@ At the end of Phase 5 you have a working cattle fleet: multiple stateless headle
 | `CLAUDE.md` | Project instructions every worker reads on start |
 | `docs/notes/` | Post-mortems and operational lessons (NEEDLE repo — read these before writing any code) |
 
+
+---
+
+## CI/CD Without Jed's Argo Workflows
+
+NEEDLE's own CI runs on Kubernetes via Argo Workflows — Jed's personal infra. That setup is not portable. You need to substitute your own CI approach. The good news: NEEDLE does not require CI to run. It is an orchestrator that runs locally or on a server. CI is about validating the code your workers produce, not running NEEDLE itself.
+
+### What NEEDLE's CI Actually Does
+
+From the repo's `.github/workflows/` and Argo config, NEEDLE's CI pipeline does three things:
+
+1. **Build validation** — `cargo build --release` to confirm the binary compiles after worker changes
+2. **Test suite** — `cargo test` across all modules
+3. **Integration smoke test** — spin up a single worker against a fixture workspace with pre-seeded beads, verify it claims and closes them correctly, check exit code
+
+You need equivalents for all three.
+
+### Option A: GitHub Actions (Recommended Starting Point)
+
+The simplest substitute. Free for public repos, 2,000 minutes/month for private.
+
+```yaml
+# .github/workflows/ci.yml
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.75"
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build
+        run: cargo build --release
+
+      - name: Test
+        run: cargo test
+
+      - name: Lint
+        run: cargo clippy -- -D warnings
+```
+
+**What this does not cover:** the integration smoke test (claiming and closing real beads) — that requires `bf` and a real `.beads/` fixture. Add it in Phase 2 once the basic pipeline is green.
+
+### Option B: Integration Smoke Test (Phase 2 Addition)
+
+Once the build/test pipeline is stable, add a smoke test that actually exercises the full claim→close loop. This catches regressions that unit tests miss (wrong workspace path, broken agent adapter YAML, silent `bf` invocation failures).
+
+```yaml
+  integration:
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.75"
+
+      - name: Build bead-forge
+        run: cargo install --git https://github.com/jedarden/bead-forge
+
+      - name: Build NEEDLE
+        run: cargo install --git https://github.com/jedarden/NEEDLE
+
+      - name: Symlink br → bf
+        run: ln -sf $(which bf) ~/.local/bin/br
+
+      - name: Initialize fixture workspace
+        run: |
+          mkdir -p /tmp/needle-fixture
+          cd /tmp/needle-fixture
+          bf init
+          bf create "Smoke test bead" -p 0 --type task \
+            --body "Write the string SMOKE_TEST_PASSED to /tmp/needle-fixture/result.txt"
+
+      - name: Run worker (echo agent)
+        run: |
+          cd /tmp/needle-fixture
+          needle run --agent echo --identity ci --once
+        timeout-minutes: 2
+
+      - name: Verify result
+        run: grep SMOKE_TEST_PASSED /tmp/needle-fixture/result.txt
+```
+
+> **Note on the echo agent:** NEEDLE's agent adapter system lets you define a YAML adapter that calls any command. For CI, define an `echo` adapter that writes deterministic output and exits 0 — no LLM call required. This tests the claim/dispatch/outcome machinery without API costs or flakiness.
+
+**Echo adapter YAML** (save as `.needle/adapters/echo.yaml` in your workspace):
+
+```yaml
+name: echo
+description: Deterministic CI adapter — no LLM
+invoke: echo "SMOKE_TEST_PASSED" > /tmp/needle-fixture/result.txt && bf close {bead_id} --body "ci"
+```
+
+### Option C: Self-Hosted Runner on Your NEEDLE Server
+
+If you are running NEEDLE on a dedicated server (Hetzner, etc.), running CI there eliminates the round-trip to GitHub's runners and lets you test against real hardware limits.
+
+```bash
+# On your server — install the GitHub Actions runner
+mkdir actions-runner && cd actions-runner
+curl -o actions-runner-linux-x64.tar.gz -L \
+  https://github.com/actions/runner/releases/download/v2.317.0/actions-runner-linux-x64-2.317.0.tar.gz
+tar xzf actions-runner-linux-x64.tar.gz
+./config.sh --url https://github.com/YOUR_ORG/YOUR_REPO --token YOUR_TOKEN
+./run.sh
+```
+
+Then in your workflow, change `runs-on: ubuntu-latest` to `runs-on: self-hosted`.
+
+**Tradeoff:** Faster and cheaper at scale, but your CI and your NEEDLE fleet compete for the same CPU and SQLite. Run CI jobs with `nice -n 19` to de-prioritize them relative to live workers.
+
+### What to Validate in CI vs. What to Leave to Workers
+
+| Concern | Where to handle it |
+|---------|-------------------|
+| Does NEEDLE compile? | CI |
+| Do unit tests pass? | CI |
+| Does the claim→close loop work mechanically? | CI (echo adapter smoke test) |
+| Does the agent produce correct output? | Bead acceptance criteria + validation gate |
+| Does the agent produce good code? | Human review of closed beads |
+| Did workers introduce regressions? | Your existing test suite, run as a bead |
+
+CI verifies the machinery. Workers verify the output. Keep them separate.
+
+### Protecting the NEEDLE Binary from Worker Modification
+
+One of the documented self-modification incidents: workers modified `build.sh`, the CI pipeline ran, produced a broken binary, and hot-reload deployed it to the entire fleet simultaneously.
+
+Add a protection rule in CI:
+
+```yaml
+  protect-needle-binary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Fail if orchestration files changed without approval
+        run: |
+          CHANGED=$(git diff --name-only HEAD~1 HEAD)
+          for file in build.sh Cargo.toml .needle.yaml; do
+            if echo "$CHANGED" | grep -q "^$file"; then
+              echo "Protected orchestration file changed: $file"
+              echo "Requires manual review before merge."
+              exit 1
+            fi
+          done
+```
+
+This blocks automated merges of any PR that touches the orchestration layer — even if a worker opened the PR. A human must explicitly approve and remove the block.
+
 ---
 
 *NEEDLE v0.2.6 · MIT License · github.com/jedarden/NEEDLE*
