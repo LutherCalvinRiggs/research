@@ -29,6 +29,59 @@ The single framing decision that separates "interesting demo" from "system that 
 
 > "In a cattle model, failure is just one more outcome the orchestrator routes."
 
+
+## Code Examples
+
+### The Pet Model (manual, session-by-session)
+```bash
+# Pet: you are the orchestrator. Interactive, one at a time.
+claude "refactor the auth module to use JWT"
+# → watch it, correct it, guide it, re-prompt when it drifts
+# Ceiling: ~3-4 concurrent sessions before you become the bottleneck
+```
+
+### The Cattle Model (bead queue + headless workers)
+```bash
+# Create tasks — the plan is the prompt
+bf create "Refactor auth module to use JWT" -p 0 --type task   --body "## Scope
+Replace session tokens with JWT in src/auth/
+
+## Acceptance Criteria
+- All existing auth tests pass
+- JWT expiry is 1 hour
+- Refresh token flow implemented
+
+## Files
+src/auth/session.ts → src/auth/jwt.ts
+tests/auth/
+
+## Close
+bf close BEAD_ID --body 'Replaced session tokens with JWT'"
+
+bf create "Add rate limiting to /api/auth" -p 0 --type task --body "..."
+bf create "Write integration tests for new auth flow" -p 1 --type task --body "..."
+
+# Launch N workers — they claim tasks atomically, run headless, close beads
+for identity in alpha bravo charlie delta; do
+  tmux new-session -d -s "needle-$identity"     "needle run --agent claude-interactive --identity $identity"
+  sleep 2  # stagger to avoid thundering herd
+done
+
+# You come back later and inspect results — not sessions
+bf list --status closed | tail -20
+```
+
+### The Test for Cattle-Readiness
+```
+Ask yourself: "Could a stateless, headless worker that does not know
+my name complete this task with only the inputs I write down?"
+
+If YES  → write it as a bead, add it to the queue
+If NO   → one of:
+  a) Specify harder (add the missing context to the bead body)
+  b) Budget attention for a pet session (high-judgment work)
+  c) Write it yourself (faster than specifying it)
+```
 ## Questions & Gaps
 - At what team size / task volume does the overhead of building cattle infrastructure pay off vs. pet sessions?
 - How do you handle tasks that are partially specifiable — enough for cattle but not perfectly so?
