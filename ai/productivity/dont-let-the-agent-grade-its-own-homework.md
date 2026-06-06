@@ -24,6 +24,64 @@ An agent reporting "done" is the actor certifying its own work. It cannot catch 
 ## Notable Quotes
 > "Fluent confidence is sedating. By the time you've read 'deployed and running,' some part of you has already moved on."
 
+
+## Code Examples
+
+### Bake Verification Into the Original Request
+```
+# BAD — verification as a follow-up (after the success report lowers your guard)
+"Deploy the new auth service."
+→ Agent: "Deployed successfully."
+→ You: "Can you check that it's actually running?"  # too late, you've moved on
+
+# GOOD — verification baked into the original request
+"Deploy the new auth service, then verify the pod is actually running
+with kubectl get pods -n production | grep auth, and confirm the
+readiness probe is passing before closing this bead."
+```
+
+### The Independent Observer Pattern
+```bash
+# Option 1: Query the live artifact directly — not the agent
+# Don't ask the agent "is the pod running?" — ask Kubernetes
+kubectl get pods -n production -l app=auth-service
+# → Running or CrashLoopBackOff. The artifact doesn't lie.
+
+# Option 2: Different tool than the one that did the work
+# Agent wrote and committed the migration — CI runs it, not the agent
+gh run watch --exit-status  # watches the CI run the agent triggered
+
+# Option 3: Separate verification agent (no knowledge of the work)
+bf create "Verify auth service deployment" -p 0 --type verification   --body "Check that the auth service deployed by bead nd-a3f8 is:
+  1. Running (kubectl get pods -n prod -l app=auth)
+  2. Passing health check (curl https://api/health/auth)
+  3. Returning 200 on POST /api/auth/login with test credentials
+  Do NOT look at the code or the prior bead. Only check the running system."
+```
+
+### Validation Gate in a Cattle Fleet
+```yaml
+# In the bead body — acceptance criteria ARE the validation gate
+## Acceptance Criteria
+# The orchestrator evaluates these before closing the bead.
+# A bead exits 0 but fails criteria → released back to queue, not closed.
+- POST /api/auth/login returns 200 with valid JWT (not just 200)
+- POST /api/auth/login returns 401 for invalid credentials
+- GET /api/protected returns 403 without Authorization header
+- GET /api/protected returns 200 with valid JWT in Authorization header
+- cargo test passes with no failures
+- No files outside src/auth/ and tests/auth/ were modified
+```
+
+```bash
+# Agent's close command should include the verification evidence
+bf close nd-XXXX --body "Implemented JWT auth.
+Verification:
+- curl -X POST /api/auth/login -d '{...}' → 200, JWT in response ✓
+- curl -X POST /api/auth/login -d '{bad}' → 401 ✓
+- cargo test auth -- 12 passed, 0 failed ✓
+- git diff --name-only HEAD~1 | grep -v 'src/auth\|tests/auth' → (empty) ✓"
+```
 ## Questions & Gaps
 - What does a practical independent-agent verification step look like in a NEEDLE-style fleet? Spawning a new worker whose only input is the artifact and the original acceptance criteria?
 - The "different tool" check — how do you chain compiler → test suite → integration test as a structured validation pipeline?
