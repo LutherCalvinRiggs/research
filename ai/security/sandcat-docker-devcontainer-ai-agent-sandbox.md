@@ -23,6 +23,95 @@ Sandcat (VirtusLab) is an open-source Docker + devcontainer setup that routes al
 - **Claude Code in dangerous mode**: The devcontainer.json enables `claudeCode.allowDangerouslySkipPermissions` — because sandcat provides the real security boundary (network isolation, secret substitution, kill switch), in-container permission prompts add friction without meaningful security benefit.
 - **Default allowlist is permissive**: By default, all GET traffic is allowed (prompt injection vector) and full GitHub access is granted (exfiltration vector). The README acknowledges this explicitly and recommends tightening for production.
 
+
+## Code Examples
+
+### Three-Container Architecture
+```yaml
+# docker-compose.yml (simplified from VirtusLab/sandcat)
+services:
+  mitmproxy:
+    image: mitmproxy/mitmproxy
+    # WireGuard server + secret substitution addon
+    volumes:
+      - ./secrets.yaml:/secrets.yaml:ro      # real API keys, read-only
+      - ./allowlist.yaml:/allowlist.yaml:ro  # domain allowlist
+    cap_add: [NET_ADMIN]
+    environment:
+      - MITM_ADDON=/addons/secret_substitution.py
+
+  wg-client:
+    image: sandcat/wg-client
+    # WireGuard client + iptables kill switch
+    cap_add: [NET_ADMIN]
+    network_mode: host
+    # iptables: all traffic must go through WireGuard tunnel
+    # direct eth0 access is blocked — if tunnel drops, container loses network
+
+  agent:
+    image: ghcr.io/anthropics/claude-code:latest
+    network_mode: "service:wg-client"  # shares wg-client network namespace
+    # No NET_ADMIN — cannot modify its own network rules
+    volumes:
+      - ./workspace:/workspace:rw
+      - ./deploy:/workspace/deploy:ro        # read-only sensitive dirs
+      - /dev/null:/workspace/.env:ro         # .env blocked entirely
+    environment:
+      # Placeholder — mitmproxy substitutes real value only for allowed hosts
+      - ANTHROPIC_API_KEY=SANDCAT_PLACEHOLDER_ANTHROPIC_API_KEY
+```
+
+### Secret Substitution Pattern (mitmproxy addon)
+```python
+# addons/secret_substitution.py
+# Runs inside mitmproxy — agent never sees this code
+import yaml
+from mitmproxy import http
+
+with open("/secrets.yaml") as f:
+    secrets = yaml.safe_load(f)   # { ANTHROPIC_API_KEY: "sk-ant-..." }
+
+with open("/allowlist.yaml") as f:
+    allowlist = yaml.safe_load(f) # { ANTHROPIC_API_KEY: ["api.anthropic.com"] }
+
+def request(flow: http.HTTPFlow):
+    for placeholder, real_value in secrets.items():
+        if placeholder in str(flow.request.content):
+            allowed_hosts = allowlist.get(placeholder, [])
+            if flow.request.pretty_host not in allowed_hosts:
+                # Placeholder appeared in request to non-allowed host — block it
+                flow.response = http.Response.make(403,
+                    f"Secret leak blocked: {placeholder} → {flow.request.pretty_host}")
+                return
+            # Allowed host — substitute real value
+            flow.request.content = flow.request.content.replace(
+                placeholder.encode(), real_value.encode())
+```
+
+### devcontainer.json Hardening
+```json
+{
+  "name": "sandcat-agent",
+  "image": "ghcr.io/anthropics/claude-code:latest",
+  "runArgs": [
+    "--cap-drop=ALL",
+    "--no-new-privileges",
+    "--security-opt=no-new-privileges:true"
+  ],
+  "containerEnv": {
+    "ANTHROPIC_API_KEY": "SANDCAT_PLACEHOLDER_ANTHROPIC_API_KEY",
+    "SSH_AUTH_SOCK": "",
+    "GPG_AGENT_INFO": ""
+  },
+  "mounts": [
+    "source=${localWorkspaceFolder}/deploy,target=/workspace/deploy,type=bind,readonly",
+    "source=/dev/null,target=/workspace/.env,type=bind,readonly"
+  ],
+  "settings": {
+    "claudeCode.allowDangerouslySkipPermissions": true
+  }
+}
+```
 ## Questions & Gaps
 - The default settings are intentionally permissive — what's the recommended locked-down configuration for handling customer data?
 - VS Code's devcontainer integration has known escape vectors (credential socket discovery) that sandcat mitigates best-effort — how complete is this mitigation?
