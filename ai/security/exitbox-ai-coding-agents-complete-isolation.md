@@ -24,6 +24,77 @@ ExitBox (Cloud Exit) is an open-source CLI tool that runs AI coding agents (Clau
 - **Supply chain hardening**: Claude Code installed via direct binary download with SHA-256 checksum verification against Anthropic's signed manifest. Alpine Linux base (~5MB vs ~80MB Debian slim). Three-layer image build (base/agent/project) with label-based caching.
 - **AGPL-3.0 with commercial licensing available**: Open source, Podman-first (rootless, daemonless), Docker compatible.
 
+
+## Code Examples
+
+### Basic Usage
+```bash
+# Install
+cargo install --git https://github.com/cloud-exit/exitbox
+
+# Start an isolated Claude Code session
+exitbox run claude --name my-feature   --allow api.anthropic.com   --allow github.com   --allow api.github.com
+
+# Resume a named session (picks up where you left off)
+exitbox run claude --name my-feature
+
+# Start OpenCode instead
+exitbox run opencode --name backend-work --allow api.openai.com
+```
+
+### The Four Isolation Layers in Practice
+```bash
+# Layer 1 — DNS disabled inside container
+# Agent tries: curl https://malicious.com → fails at DNS resolution
+# No /etc/resolv.conf inside the container — all DNS queries fail
+
+# Layer 2 — Squid proxy is the only egress path
+# HTTPS_PROXY=http://squid:3128 is set for all processes
+# Tools that don't use the proxy get no network access
+
+# Layer 3 — Domain allowlist enforced at proxy
+# Squid config (auto-generated from --allow flags):
+#   acl allowed_domains dstdomain api.anthropic.com github.com api.github.com
+#   http_access allow allowed_domains
+#   http_access deny all
+
+# Layer 4 — Linux capabilities dropped
+# docker run --cap-drop=ALL --security-opt=no-new-privileges
+# --security-opt=seccomp=exitbox-seccomp.json (raw sockets blocked)
+```
+
+### Runtime Domain Approval (exitbox-allow)
+```bash
+# Inside the container, agent hits a blocked domain and calls:
+exitbox-allow pypi.org
+# This sends a request over Unix socket IPC to the host terminal
+
+# On the HOST, you see:
+# ┌─────────────────────────────────────┐
+# │ Agent requests access to: pypi.org  │
+# │ Allow? [y/n]                        │
+# └─────────────────────────────────────┘
+# Press y → domain hot-reloaded into Squid, no container restart
+# Press n → agent gets 403, continues without it
+```
+
+### Credential Vault
+```bash
+# Store a secret in the workspace vault (AES-256, Argon2id)
+exitbox vault set STRIPE_SECRET_KEY --workspace my-feature
+# Prompts for value, encrypts, stores in ~/.exitbox/vaults/my-feature/
+
+# Inside the container, agent reads from vault (not .env):
+# Every read triggers a host-side approval popup:
+# ┌─────────────────────────────────────────────────────┐
+# │ Agent is reading: STRIPE_SECRET_KEY                 │
+# │ Will be sent to: api.stripe.com (in allowlist)      │
+# │ Allow? [y/n]                                        │
+# └─────────────────────────────────────────────────────┘
+
+# .env is explicitly blocked:
+# docker run -v /dev/null:/workspace/.env:ro ...
+```
 ## Questions & Gaps
 - How does ExitBox handle agent tools that bundle their own Node.js or CA roots (like Cursor CLI) — the same TLS interception problem sandcat documents?
 - The 4-layer defense uses Squid for egress — how does this perform under concurrent agent load?
