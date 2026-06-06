@@ -25,6 +25,78 @@ The pet model's hidden cost control is your attention — you're the rate limite
 ## Notable Quotes
 > "If you have not built that, you do not have a cattle system. You have a pet system with the supervision removed, which is a different thing. It looks the same right up until the bill arrives."
 
+
+## Code Examples
+
+### The Three Execution Bounds (.needle.yaml)
+```yaml
+# These three bounds convert "worker decides when to stop"
+# to "orchestrator decides when to stop"
+worker:
+  max_execution_minutes: 30      # wall-clock timeout per bead
+  max_output_tokens: 100_000     # output token cap per bead
+  max_model_calls: 50            # model invocation cap per bead
+  # Any bound tripped → kill worker → release bead → retry
+  max_retries: 3                 # before marking bead permanently failed
+```
+
+### Claude-Governor Config (spend cap proxy)
+```yaml
+# governor.yaml — sits between workers and api.anthropic.com
+api_key: "sk-ant-..."           # real key, only governor sees it
+proxy_port: 8080
+
+limits:
+  daily_usd: 50                 # hard daily spend cap
+  weekly_usd: 200               # hard weekly spend cap
+  concurrent_requests: 20       # semaphore — max simultaneous in-flight calls
+
+quota:
+  # Anthropic exposes weekly limit headers — governor reads them
+  anthropic_weekly_tokens: 10_000_000
+  # Z.AI exposes nothing — governor must track independently
+  zai_weekly_tokens_ledger: true  # count outflow at proxy layer
+
+# Workers point at proxy, not Anthropic directly:
+# ANTHROPIC_BASE_URL=http://localhost:8080
+```
+
+### Cost Per Closed Outcome (the right metric)
+```python
+# Wrong metric: cost per token
+cost_per_token = total_spend / total_tokens
+
+# Right metric: cost per closed bead
+cost_per_outcome = total_spend / beads_closed
+
+# A worker burning 800K tokens to close 5 beads:
+worker_a = 800_000 * 0.000015 / 5  # = $2.40 per closed bead
+
+# A worker burning 200K tokens to close 1 bead:
+worker_b = 200_000 * 0.000015 / 1  # = $3.00 per closed bead
+
+# Worker A is 4x cheaper per outcome even though it burns 4x more tokens.
+# Optimizing for token count would have made you choose Worker B.
+```
+
+### Detecting a Runaway (what to instrument)
+```python
+# In your governor or monitoring layer — alert before the bill arrives
+def check_worker_health(worker_id: str, bead_start_time: float, tokens_this_bead: int, model_calls_this_bead: int):
+    elapsed_minutes = (time.time() - bead_start_time) / 60
+
+    if elapsed_minutes > 30:
+        alert(f"Worker {worker_id}: time bound exceeded ({elapsed_minutes:.0f}min)")
+        kill_and_release(worker_id)
+
+    if tokens_this_bead > 100_000:
+        alert(f"Worker {worker_id}: token bound exceeded ({tokens_this_bead:,} tokens)")
+        kill_and_release(worker_id)
+
+    if model_calls_this_bead > 50:
+        alert(f"Worker {worker_id}: iteration bound exceeded ({model_calls_this_bead} calls)")
+        kill_and_release(worker_id)
+```
 ## Questions & Gaps
 - What's a reasonable starting budget for time/token/iteration bounds on a coding task? Any empirical data from NEEDLE production runs?
 - The three-bound kill mechanism — does this interact badly with tasks that are legitimately long (e.g. large refactors)?
