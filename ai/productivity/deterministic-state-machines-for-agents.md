@@ -29,6 +29,101 @@ The control structure that lets twenty headless workers run unattended: a rigid,
 
 > "You stop debugging individual workers and start debugging the outcome distribution — which row of the table is firing more often than it should?"
 
+
+## Code Examples
+
+### The Exhaustive Outcome Enum (Rust)
+```rust
+// Every possible outcome is a variant. The compiler enforces exhaustiveness.
+// No `_ => continue` wildcard allowed — that's the entire discipline.
+#[derive(Debug)]
+enum WorkerOutcome {
+    Success,           // exit 0 — validate, close bead, loop
+    Failure,           // exit 1 — release bead, increment retry, loop
+    Timeout,           // exit 124 — release bead, mark deferred, loop
+    Crash(i32),        // exit >128 — release, create alert bead, loop
+    RaceLost,          // exit 4 — exclude candidate, retry SELECT
+    QueueEmpty,        // no beads — enter strand escalation
+}
+
+fn handle_outcome(outcome: WorkerOutcome, bead_id: &str, db: &Db) {
+    match outcome {
+        WorkerOutcome::Success       => { validate_and_close(bead_id, db); }
+        WorkerOutcome::Failure       => { release_and_retry(bead_id, db); }
+        WorkerOutcome::Timeout       => { release_and_defer(bead_id, db); }
+        WorkerOutcome::Crash(code)   => { release_and_alert(bead_id, code, db); }
+        WorkerOutcome::RaceLost      => { /* retry SELECT immediately */ }
+        WorkerOutcome::QueueEmpty    => { run_strand_escalation(db); }
+        // No wildcard. Adding a new outcome requires handling it here.
+        // The compiler will refuse to compile until every arm is covered.
+    }
+}
+```
+
+### Classifying Exit Code → Outcome
+```rust
+fn classify_exit(code: i32) -> WorkerOutcome {
+    match code {
+        0        => WorkerOutcome::Success,
+        1        => WorkerOutcome::Failure,
+        4        => WorkerOutcome::RaceLost,
+        124      => WorkerOutcome::Timeout,
+        c if c > 128 => WorkerOutcome::Crash(c),
+        _        => WorkerOutcome::Failure,  // unexpected non-zero → treat as failure
+    }
+}
+```
+
+### The Six-Step Loop (pseudocode)
+```rust
+loop {
+    // Step 1: SELECT
+    let Some(bead) = db.select_next_claimable() else {
+        handle_outcome(WorkerOutcome::QueueEmpty, "", &db);
+        continue;
+    };
+
+    // Step 2: CLAIM (atomic BEGIN IMMEDIATE transaction)
+    if !db.claim(&bead.id, &worker_identity) {
+        handle_outcome(WorkerOutcome::RaceLost, &bead.id, &db);
+        continue;
+    }
+
+    // Step 3: BUILD prompt deterministically from bead + CLAUDE.md
+    let prompt = build_prompt(&bead, &workspace_config);
+
+    // Step 4 + 5: DISPATCH and EXECUTE
+    let exit_code = dispatch_agent(&prompt, &agent_adapter, timeout_secs);
+
+    // Step 6: OUTCOME — classify and route, no wildcards
+    let outcome = classify_exit(exit_code);
+    handle_outcome(outcome, &bead.id, &db);
+}
+```
+
+### Schema-First New Outcome (how to add a new outcome safely)
+```rust
+// Step 1: Add the variant to the enum
+enum WorkerOutcome {
+    // ... existing variants ...
+    RateLimited,  // new: API returned 429
+}
+
+// Step 2: The compiler now refuses to compile — every match arm must handle it.
+// It will point you to every place that needs updating. Fix them all.
+
+// Step 3: Add the classifier
+fn classify_exit(code: i32) -> WorkerOutcome {
+    match code {
+        // ...
+        42 => WorkerOutcome::RateLimited,  // custom exit code from agent adapter
+        // ...
+    }
+}
+
+// Step 4: Add the handler
+WorkerOutcome::RateLimited => { backoff_and_release(&bead.id, &db); }
+```
 ## Questions & Gaps
 - How do you handle outcomes that require human judgment — e.g. "agent completed but output is ambiguous"? Is there a pattern for routing those to async human review?
 - The article suggests exit codes are too coarse. What would a structured outcome envelope look like in practice, and what format would agent adapters use?
