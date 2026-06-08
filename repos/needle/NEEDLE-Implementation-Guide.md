@@ -1,6 +1,7 @@
 # NEEDLE Implementation Guide
 
 > A self-contained brief for an agent setting up a headless multi-worker bead fleet from scratch.
+> **v2 — Updated to reflect the Kiro + NEEDLE integrated workflow.**
 > Read this in full before writing any code or running any install commands.
 
 ---
@@ -8,6 +9,20 @@
 ## Critical Context
 
 NEEDLE has a well-documented production history including catastrophic failures: 5,741 duplicate beads from a mitosis explosion, fleet-wide crashes from bad hot-reloads, and a week of 100% false-positive starvation alerts. Most are fixed in the current Rust rewrite. The lessons are embedded throughout this guide — do not skip the failure modes section.
+
+**This guide assumes the following context:**
+- You are a solo developer managing a multi-repo product (MAC.BID) using Kiro as your primary AI coding assistant
+- You have an existing kiro-config workflow (steering files, skills, memory system, worktrees)
+- You want to add NEEDLE as the execution layer for parallel, headless work
+- gstack provides the product thinking and quality verification layer
+
+The three systems form a stack. Each handles a distinct phase:
+
+```
+gstack          →  Think & Validate  (office-hours, plan reviews, security audits)
+kiro-config     →  Plan & Decide     (orchestrate, memory, approval gates)
+NEEDLE          →  Execute at Scale  (parallel workers, bead queue, headless)
+```
 
 ---
 
@@ -17,7 +32,7 @@ NEEDLE (**N**avigates **E**very **E**nqueued **D**eliverable, **L**ogs **E**ffor
 
 **Core principle:** "If an outcome can happen, it has a handler. If it doesn't have a handler, it cannot happen." There are no wildcards, no swallowed errors, no undefined paths.
 
-Multiple NEEDLE workers run in parallel against the same queue with no central orchestrator. Coordination happens entirely through SQLite atomic transactions. Adding a worker means running one command in a new tmux session.
+Multiple NEEDLE workers run in parallel against the same queue with no central orchestrator. Coordination happens entirely through SQLite atomic transactions. Adding a worker requires running one command in a new tmux session.
 
 ---
 
@@ -36,20 +51,18 @@ Every NEEDLE worker executes this loop indefinitely until it times out or is kil
 
 ### Outcome Table
 
-Every outcome has a handler. This is the complete set:
-
 | Outcome | Exit Code | Handler |
 |---------|-----------|---------|
 | ✅ Success | `0` | Validate output → close bead → log effort → loop |
 | ❌ Failure | `1` | Log failure reason → release bead → increment retry count → loop |
 | ⏰ Timeout | `124` | Release bead → mark deferred → loop |
-| 💀 Crash | `>128` (SIGKILL, SIGSEGV, etc.) | Release bead → create alert bead → loop |
+| 💀 Crash | `>128` | Release bead → create alert bead → loop |
 | 🏁 Race lost | `4` | Exclude this candidate → retry SELECT immediately |
 | 🫙 Queue empty | — | Enter strand escalation waterfall |
 
 ### Strand Escalation
 
-When the primary workspace has no claimable beads, NEEDLE evaluates seven strands in waterfall order. The first that yields a bead wins:
+When the primary workspace has no claimable beads, NEEDLE evaluates seven strands in waterfall order:
 
 | # | Strand | Always On? | Purpose |
 |---|--------|-----------|---------|
@@ -61,212 +74,294 @@ When the primary workspace has no claimable beads, NEEDLE evaluates seven strand
 | 6 | Pulse | Opt-in (48h cooldown) | Codebase health scans, auto-generate beads. |
 | 7 | Knot | Yes | All strands exhausted. Alert human. Wait. |
 
-> ⚠️ **Fleet gotcha:** Weave, Pulse, and Unravel cooldowns are per-workspace and shared across ALL workers. A fleet of 20 workers can reach a state where all strand gates are closed simultaneously — every worker idles even though work exists in other workspaces. Monitor with: `needle status --idle-strands`
-
-**For a first implementation, start with Pluck → Explore → Mend → Knot only.** Weave, Pulse, and Unravel are opt-in and have historically caused the most operational problems. Enable them only after the core loop is stable for at least a week.
+> ⚠️ **For a first implementation, start with Pluck → Explore → Mend → Knot only.** Weave, Pulse, and Unravel have historically caused the most operational problems. Enable them only after the core loop is stable for at least a week.
 
 ---
 
 ## The Beads Ecosystem
 
-NEEDLE sits on top of a three-generation lineage of compatible issue-tracking tools. Understanding the genealogy matters because NEEDLE references `br` by name throughout its code, docs, and CLAUDE.md.
+NEEDLE calls `br` throughout its code and docs. The correct implementation for multi-worker fleets is `bead-forge` (`bf`), symlinked as `br`.
 
-| CLI | Repo | Language | Role |
-|-----|------|----------|------|
-| `bd` | github.com/steveyegge/beads | Go | The original. Git-backed JSONL issue tracker designed as agent memory. Defines the `.beads/` format everyone else follows. No concurrency story. |
-| `br` | github.com/dicklesworthstone/beads_rust | Rust | 10–100× faster port of `bd`. Adds sync, doctor, TOON output. Same single-writer SQLite — no atomic claiming. |
-| `bf` | github.com/jedarden/bead-forge | Rust | Drop-in superset of `br`. Adds atomic claiming via `BEGIN IMMEDIATE` transactions, critical-path scoring, velocity tracking, crash-safe mitosis. Built for NEEDLE fleets. |
+| CLI | Repo | Role |
+|-----|------|------|
+| `bd` | github.com/steveyegge/beads | Original. Defines the `.beads/` JSONL format. No concurrency story. |
+| `br` | github.com/dicklesworthstone/beads_rust | Fast Rust port. Single-writer SQLite — race conditions at 11+ workers. |
+| `bf` | github.com/jedarden/bead-forge | Drop-in superset of `br`. Atomic `BEGIN IMMEDIATE` transactions. Built for NEEDLE fleets. |
 
-> ✅ **Use bead-forge (`bf`) as your `br`.** Symlink `br → bf` and all of NEEDLE's scripts, prompts, and CLAUDE.md instructions continue to work unchanged. No code changes to NEEDLE required.
+> ✅ **Use bead-forge (`bf`) as your `br`.** Symlink `br → bf` and all of NEEDLE's scripts work unchanged.
 
-### Why bead-forge Instead of beads_rust
+---
 
-`beads_rust` claiming is a client-side read-then-write race. With 11+ workers:
+## How kiro-config and NEEDLE Work Together
+
+This is the core of the v2 guide. The two systems are not alternatives — they cover different phases of the same workflow.
+
+### The Division of Labor
+
+**kiro-config handles judgment-intensive phases** where you need to stay in the loop:
+- Product thinking (`/office-hours` via gstack)
+- Strategic plan review (`/plan-ceo-review` via gstack)
+- Architecture decisions (orchestrator + steering files)
+- Planning phase of `/orchestrate` → produces `plan.md`
+- Human approval gates on irreversible actions
+- PR creation and deploy decisions
+
+**NEEDLE handles execution-intensive phases** where parallelism matters and the spec is complete:
+- Building phase — N workers execute the `plan.md` checklist in parallel
+- Bulk repetitive work (add logging to 47 handlers, write tests for every untested endpoint)
+- Cross-repo implementation tasks that are clearly specifiable
+- Long-running autonomous work sessions
+
+### The Handoff Point: plan.md → Beads
+
+Your `/orchestrate` skill already produces a `plan.md` checklist. This is the natural handoff point. After you approve the plan in kiro, instead of saying "Continue" to start the interactive building phase, you create beads:
+
+```bash
+# Your /orchestrate produces plan.md with items like:
+# - [ ] Add POST /auth/refresh handler in src/handlers/auth.js
+# - [ ] Update authorizer allow-list in serverless.yml
+# - [ ] Write unit tests for new handler
+
+# Convert each item to a bead:
+bf create "Add POST /auth/refresh handler" -p 0 --type task \
+  --body "## Scope
+Add handler in src/handlers/auth.js matching existing handler patterns.
+
+## Acceptance Criteria
+- Returns 200 with new JWT on valid refresh token
+- Returns 401 on invalid/expired token
+- Follows dbReader/dbWriter pattern from code-standards
+- console.log at top with customer_id traceable identifier
+- Unit tests pass
+
+## Files
+src/handlers/auth.js
+tests/handlers/auth.test.js
+
+## Close
+bf close BEAD_ID --body 'summary of what was done'"
+```
+
+The key insight: **your steering files become your CLAUDE.md**. The business rules, code standards, and git workflow that kiro-config injects into every session get written into the NEEDLE workspace CLAUDE.md once — then every worker reads them cold on every bead.
+
+### Mapping kiro-config Concepts to NEEDLE
+
+| kiro-config | NEEDLE equivalent |
+|-------------|------------------|
+| `/orchestrate` planning phase | Writing the genesis bead + `plan.md` |
+| `/orchestrate` building phase | Worker executing task beads |
+| `plan.md` checklist item | Task bead body |
+| `/handoff` | `bf close BEAD_ID --body "summary"` |
+| `/update-memory` → `active-work.md` | Bead status in the queue |
+| `decisions.md` (append-only) | `.beads/learnings.md` |
+| Worktree per feature | NEEDLE worker worktree isolation |
+| `/run-tests` | Acceptance criteria in the bead body |
+| Orchestrator approval gate | HUMAN bead that blocks next phase |
+| `/create-pr` | Land-and-deploy bead (still requires your confirmation) |
+| `feature-work-log.md` | Bead history + NEEDLE telemetry |
+
+### The Integrated Workflow (Full Picture)
 
 ```
-Worker A: br list → sees bead-123 (open, highest priority)
-Worker B: br list → sees bead-123 (same bead)
-Worker A: br update bead-123 --status in_progress → SUCCESS
-Worker B: br update bead-123 --status in_progress → FAILS (already claimed)
-# 10 out of 20 workers waste their full iteration on failed claims.
-# Observed in production: 4 workers simultaneously claiming the same bead.
+THINK (gstack)
+  /office-hours         → validates the problem is worth solving
+  /plan-ceo-review      → strategic challenge before any code
+  /plan-eng-review      → architecture decisions, edge cases, failure modes
+
+PLAN (kiro-config)
+  /orchestrate <feature>
+    → reads steering files
+    → analyzes existing code patterns
+    → produces plan.md checklist
+    → presents for approval
+  [YOU: approve or revise]
+
+DECOMPOSE (bridge step)
+  For each item in plan.md:
+    bf create "task title" -p 0 --body "..."
+  bf dep add <child> <parent>   # enforce ordering where needed
+  HUMAN gate beads for irreversible actions (migrations, deploys)
+
+EXECUTE (NEEDLE)
+  needle run --agent claude-interactive --identity alpha
+  needle run --agent claude-interactive --identity bravo
+  needle run --agent claude-interactive --identity charlie
+  # Workers run in parallel, claim beads atomically, close when done
+
+VERIFY (gstack + kiro-config)
+  gstack /cso           → security audit before PR
+  gstack /qa            → browser-based QA against staging
+  /create-pr            → structured PR, requires your confirmation
+
+SHIP
+  [YOU: merge PR]
+  /deploy               → guided deployment with explicit confirmation gates
+
+REFLECT
+  /archive <feature>    → consolidate learnings, update memory
+  .beads/learnings.md   → NEEDLE captures worker learnings
 ```
 
-bead-forge wraps the entire read-score-pick-update sequence in a single `BEGIN IMMEDIATE` SQLite transaction. The second worker to arrive blocks for ~1ms then picks the next available bead. 20 workers calling `bf claim` simultaneously each get a distinct bead with zero phantom claims.
+### When to Use kiro-config vs NEEDLE
+
+Use **kiro-config (interactive)** when:
+- The task requires your judgment at each step
+- The spec isn't complete enough to execute unattended
+- You're doing the planning and architecture phase
+- The work involves decisions you haven't made yet
+- You want to steer mid-task
+
+Use **NEEDLE (headless)** when:
+- You can answer "yes" to: "Could a stateless worker complete this from the bead body alone?"
+- The task is parallel — multiple independent items that don't need to wait for each other
+- The work is repetitive across many files/endpoints/components
+- The plan is complete and approved
+- You want to step away while it runs
+
+### Converting Your Worktrees
+
+NEEDLE uses git worktrees natively — your existing `<repo>--<feature>` convention maps directly. When creating beads for a feature, specify the worktree path in CLAUDE.md or in each bead body:
+
+```markdown
+## Context
+Working directory: ~/Mac_Code/API--lato
+Branch: luther/lato
+All commands must run from this worktree, not ~/Mac_Code/API
+```
+
+This mirrors exactly what `/pickup-memory` does — loads the worktree path so the agent works in the right place.
+
+### HUMAN Gate Beads for Your Workflow
+
+Your code-standards.md already has the right instincts ("confirm destructive actions"). Encode them as HUMAN beads in the bead hierarchy:
+
+```bash
+# Example: migration → human review → production deploy
+bf create "Run migration on staging" -p 0 --type task --body "..."
+MIGRATION_BEAD=$( bf list --status open --format json | jq -r '.[0].id' )
+
+bf create "HUMAN: Review staging migration results before production" -p 0 --type human
+HUMAN_BEAD=$( bf list --status open --format json | jq -r '.[0].id' )
+
+bf create "Run migration on production" -p 0 --type task --body "..."
+PROD_BEAD=$( bf list --status open --format json | jq -r '.[0].id' )
+
+# Enforce ordering
+bf dep add $HUMAN_BEAD $MIGRATION_BEAD   # human gate blocked by migration completing
+bf dep add $PROD_BEAD $HUMAN_BEAD        # prod deploy blocked by human gate
+```
+
+Workers will complete the migration bead, then stop at the HUMAN bead (it's not a worker task), and you close it manually after reviewing. Production deploy then becomes claimable.
 
 ---
 
 ## Full Dependency List
 
-### Hard Dependencies — NEEDLE Will Not Run Without These
+### Hard Dependencies
 
 #### 1. Rust 1.75+
-
-Required to build both NEEDLE and bead-forge from source.
-
 ```bash
-# Install via rustup
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 source $HOME/.cargo/env
-
-# Verify
 rustc --version    # must be 1.75+
-cargo --version
 ```
 
 #### 2. bead-forge (the `br` CLI)
-
-No prebuilt release binary exists yet. Must build from source.
-
 ```bash
-# Build and install
 cargo install --git https://github.com/jedarden/bead-forge
-
-# Symlink so NEEDLE's scripts find "br"
 ln -sf $(which bf) ~/.local/bin/br
-
-# Verify
-bf --version
-br --version    # should show same output via symlink
+bf --version && br --version    # both should work
 ```
 
-> ⚠️ **Known issue:** In the original `beads_rust`, `br show --json` never included labels in its output. This caused the 5,741-bead mitosis explosion — every label-based guard silently returned empty. Always read labels with `bf label list BEAD_ID`, never `bf show --json`. Verify bead-forge's `show --json` actually includes labels before relying on it.
+> ⚠️ Always read labels with `bf label list BEAD_ID`, never `bf show --json`. The `show --json` bug caused the 5,741-bead mitosis explosion.
 
 #### 3. NEEDLE Binary
-
 ```bash
-# Prebuilt install (when release assets exist)
 curl -fsSL https://github.com/jedarden/NEEDLE/releases/latest/download/install.sh | bash
-
-# Or build from source
+# Or build from source:
 cargo install --git https://github.com/jedarden/NEEDLE
-
-# Verify
 needle --version
 ```
 
 #### 4. tmux
-
-Each NEEDLE worker runs in its own tmux session. Required for parallel workers and session persistence.
-
 ```bash
 sudo apt install tmux    # Debian/Ubuntu
 brew install tmux        # macOS
 ```
 
-#### 5. An Agent CLI (pick one)
+#### 5. An Agent CLI
+For your setup, `claude-interactive` is recommended — keeps workers on subscription billing rather than API credits.
 
-NEEDLE is agent-agnostic. Any CLI that accepts a prompt and exits works via a YAML adapter file.
+| Agent | CLI | Notes |
+|-------|-----|-------|
+| Claude Code (subscription) | claude-interactive plugin | Recommended. Requires Python 3.10+, `pip install pyte`. |
+| Claude Code (API) | `claude --print` | Simpler setup, costs per-token. |
+| OpenCode | `opencode` | |
+| Kiro | via adapter | See Kiro integration section below. |
 
-| Agent | CLI | Input Method | Notes |
-|-------|-----|-------------|-------|
-| Claude Code (subscription) | claude-interactive plugin | stdin via PTY | Recommended. Uses subscription billing, not API credits. Requires Python 3.10+ and `pip install pyte`. |
-| Claude Code (API) | `claude --print` | stdin | Uses API billing. Simpler setup but costs per-token. |
-| OpenCode | `opencode` | file | — |
-| Codex CLI | `codex` | args | — |
-| Aider | `aider --message` | args | — |
-
-#### 6. claude-interactive Plugin (if using subscription billing)
-
-`claude` detects non-TTY context (subprocess pipe) and switches to API billing. This plugin creates an internal PTY so Claude sees a real terminal, keeping it in interactive/subscription mode.
-
+#### 6. claude-interactive Plugin
 ```bash
-# Requirements
 python3 --version    # must be 3.10+
 pip install pyte
-
-# Download plugin from NEEDLE release assets
 gh release download v0.2.6 --repo jedarden/NEEDLE --pattern 'claude-interactive*'
-chmod +x claude-interactive-install.sh
 ./claude-interactive-install.sh
-
-# Verify
-which claude-interactive
 ```
 
----
-
-### Soft Dependencies — Needed for Production, Not First Run
+### Soft Dependencies (Production)
 
 #### 7. claude-governor (Spend Cap Proxy) — Strongly Recommended
-
-With headless workers running unattended, there is no human watching the Anthropic dashboard. **Without a spend cap, a retry loop bug can produce a five-figure invoice overnight.** claude-governor is a Rust proxy that sits between workers and `api.anthropic.com`, enforcing hard daily/weekly spend caps.
-
 ```bash
 cargo install --git https://github.com/jedarden/claude-governor
-
-# Workers point at the proxy instead of api.anthropic.com
-# The proxy holds the real API key; workers never see it
+# Set ANTHROPIC_BASE_URL=http://localhost:8080 in worker environment
+# Governor holds the real API key; workers never see it
 ```
 
-> ⚠️ **Do not skip this.** The pet model's hidden cost control is your attention — you are the rate limiter. Cattle removes that. Something explicit must replace it before workers go headless.
+> ⚠️ Without a spend cap, a retry loop bug can produce a five-figure invoice overnight.
 
-#### 8. ccdash (Fleet Health TUI — Optional)
-
-Terminal dashboard for monitoring worker sessions, token usage, and queue health.
-
+#### 8. ccdash — Fleet Health TUI
 ```bash
 cargo install --git https://github.com/jedarden/ccdash
-ccdash    # launch in a separate terminal
 ```
 
-#### 9. beads_viewer / bv (Queue Visualizer — Optional)
-
-Keyboard-driven TUI for browsing the bead queue visually. Kanban board, dependency graph, critical path analytics. Also has robot mode for agents.
-
+#### 9. beads_viewer / bv
 ```bash
-brew install dicklesworthstone/tap/bv    # macOS/Linux
-
-# In agent context, always use --robot flags:
-bv --robot-triage    # structured JSON triage output
-bv --robot-next      # top pick + exact claim command
-# ⚠️ Never run bare "bv" — it launches an interactive TUI and blocks the process
+brew install dicklesworthstone/tap/bv
+bv --robot-triage    # always use --robot flags in agent context
+# Never run bare "bv" — it launches an interactive TUI and blocks
 ```
-
-#### 10. OTLP Backend (Observability — Optional but Recommended)
-
-NEEDLE emits structured OpenTelemetry telemetry for every state transition, following `gen_ai.*` semantic conventions. Works with Jaeger, Tempo, Grafana, Honeycomb, Datadog, or any OTLP-compatible backend. A working docker-compose example (OTel Collector + Jaeger + Prometheus + Loki + Grafana) is at `docs/examples/otel-collector/` in the NEEDLE repo.
 
 ---
 
 ## Workspace Setup
 
-A "workspace" is any directory with a `.beads/` directory. All workers pointing at the same workspace share the same queue.
-
 ### Step 1: Initialize the Bead Queue
 
 ```bash
-cd /path/to/your/project
+cd /path/to/your/project    # e.g. ~/Mac_Code/API--feature
 bf init
 
-# This creates:
+# Creates:
 #   .beads/issues.jsonl      ← append-only source of truth (commit this)
-#   .beads/beads.db          ← SQLite cache (DO NOT commit — add to .gitignore)
-#   .beads/config.yaml       ← workspace config
-#   .beads/metadata.json
+#   .beads/beads.db          ← SQLite cache (add to .gitignore)
+#   .beads/config.yaml
+
+echo ".beads/beads.db" >> .gitignore
 ```
 
 ### Step 2: Configure `.beads/config.yaml`
 
-bead-forge reads NEEDLE-specific keys that the upstream `br` ignores. A minimal config for a NEEDLE fleet:
-
 ```yaml
 issue_prefixes:
-  - nd      # prefix for your project's beads (e.g. nd-a3f8)
+  - mb        # mac.bid — use a prefix meaningful to your project
 default_priority: 2
 default_type: task
 scoring:
   priority_weight: 0.4
-  blockers_weight: 0.3    # beads blocking more work score higher
-  age_weight: 0.2         # older beads score higher
+  blockers_weight: 0.3
+  age_weight: 0.2
   labels_weight: 0.1
   max_age_hours: 20
-  max_blockers: 3
-claim_ttl_minutes: 30     # stale claims auto-released by mend strand
-rotate:
-  rotate_age_days: 30
-  rotate_max_size_mb: 100
-  rotate_max_archives: 10
+claim_ttl_minutes: 30
 secret_protection:
   enabled: true
 ```
@@ -274,27 +369,23 @@ secret_protection:
 ### Step 3: Create `.needle.yaml`
 
 ```yaml
-# Agent to use by default
-agent: claude-interactive    # or: claude, opencode, codex, aider
+agent: claude-interactive
 
-# Worker settings
 worker:
-  idle_timeout_seconds: 300  # exit after 5min of no claimable beads
-  max_retries: 3             # max retry attempts before marking a bead failed
-  max_execution_minutes: 30  # kill worker if single bead takes longer
-  max_output_tokens: 100000  # kill worker if bead emits more than this
-  max_model_calls: 50        # kill worker if bead triggers more model calls
+  idle_timeout_seconds: 300
+  max_retries: 3
+  max_execution_minutes: 30
+  max_output_tokens: 100000
+  max_model_calls: 50
 
-# Strand configuration — start with only the core three
 strands:
   pluck:   { enabled: true }
-  explore: { enabled: true, workspaces: [] }   # add other workspace paths here
+  explore: { enabled: true, workspaces: [] }
   mend:    { enabled: true }
-  weave:   { enabled: false }   # enable only after core is stable for 1+ week
+  weave:   { enabled: false }    # enable only after core is stable
   unravel: { enabled: false }
   pulse:   { enabled: false }
 
-# Telemetry (optional)
 telemetry:
   otlp_sink:
     enabled: false
@@ -302,17 +393,16 @@ telemetry:
     protocol: "grpc"
 ```
 
-### Step 4: Create `CLAUDE.md`
+### Step 4: Create CLAUDE.md from Your Steering Files
 
-`CLAUDE.md` is the project-level instruction file every NEEDLE worker reads at the start of each task. It is the most important document you will write for the fleet. Workers start cold — they have only this file and the bead body. Anything not in `CLAUDE.md` or the bead body is unknown to the worker.
-
-**Minimum required content:**
+This is the critical step for your setup. Your kiro-config steering files are already excellent — transplant them into CLAUDE.md.
 
 ```markdown
-# CLAUDE.md — [project name]
+# CLAUDE.md — MAC.BID API
 
-## Overview
-[What this project does, in one paragraph.]
+## Project Context
+MAC.BID — online auction platform. Serverless Node.js backend on AWS Lambda.
+See full product context: ~/kiro-config/steering/product.md
 
 ## Bead Workflow
 When work is complete:
@@ -321,98 +411,108 @@ When work is complete:
 If work cannot be completed:
   bf update BEAD_ID --status blocked --body "Reason"
 
-## Code Style
-[Language version. Linting command. Formatter command.]
-[Do not add dependencies that require a newer version without updating X.]
+## Working Directory
+Always check your bead body for the Worktree path.
+Never work in ~/Mac_Code/API — always use the feature worktree (e.g. ~/Mac_Code/API--feature).
+
+## Code Standards
+[Contents of steering/code-standards.md]
+
+## Tech Stack
+[Contents of steering/tech.md]
+
+## Git Workflow
+[Contents of steering/git-workflow.md — branch naming, commit discipline, no force pushes]
 
 ## Testing
-[How to run tests. Where tests live.]
-[IMPORTANT: Do not run [expensive command] locally — push and let CI handle it.]
+Mock at manager module level, not SDK level.
+Test business logic, not infrastructure plumbing.
+Write tests immediately after implementing, not as afterthought.
 
-## Commit Convention
-feat(bead-id): short description
-fix(bead-id): short description
+## Database Access
+Always use databaseConnections.js helpers.
+dbReader() for SELECT, dbWriter() for INSERT/UPDATE/DELETE.
+Always disconnect in a finally block.
 
-## Architecture
-[Module dependency graph.]
-[Key constraints and non-negotiables.]
+## Handler Logging
+Every handler MUST have console.log near top with:
+1. Natural-language description of what the handler does
+2. Traceable identifier (customer_id, ticket_ref, invoice_id, lot_id)
 
 ## Known Constraints
-[Fixed points that eliminate solution space.]
-[External interfaces you cannot change.]
-[Performance or security budgets.]
+[Contents of any relevant reference files from skills/api-dev/references/]
 ```
 
 ---
 
-## Bead Structure and Task Decomposition
+## Bead Structure for MAC.BID
 
-A bead is the atomic unit of work a NEEDLE worker processes in one session. Getting granularity right is critical — oversized beads are the primary cause of timeouts. ~20% of all bead closures in production required timeout escalations before sizing was tuned.
+### Sizing Guidelines
 
-### Bead Sizing Guidelines
-
-**Split the bead if any of:**
+**Split the bead if:**
 - Body length exceeds 4,000 characters
 - More than 10 acceptance criteria
-- Mixes concerns (e.g. CLI + execution + recovery)
-- Contains sequential phases ("first X, then Y, then Z")
+- Mixes concerns (e.g. endpoint + migration + tests)
+- Contains sequential phases
 
-**Keep together if all of:**
-- Single file or module
-- Under 3,000 characters
-- Fewer than 8 acceptance criteria
+**Keep together if:**
+- Single file or function
+- Under 3,000 characters, fewer than 8 criteria
 
-**Common split pattern for oversized beads:**
-1. Setup / infrastructure / framework (P0)
-2. Core implementation / execution (P0)
-3. Advanced features / cleanup / recovery (P1 or P2)
+**MAC.BID-specific split pattern:**
+1. Schema / migration (P0)
+2. Handler implementation (P0)
+3. Tests + validation (P0)
+4. Documentation / cleanup (P1)
 
-### Genesis → Phase → Task Hierarchy
+### Genesis → Phase → Task for a MAC.BID Feature
 
-For multi-phase projects, use a three-level hierarchy:
+```
+Genesis bead:  "Implement auth token refresh flow"
+  Phase bead:  "Phase 1: Database schema"
+    Task bead: "Create migration 202506071400.sql + rollback"
+    Task bead: "HUMAN: Review migration before running on staging"
+  Phase bead:  "Phase 2: API endpoint"
+    Task bead: "Add POST /auth/refresh handler"
+    Task bead: "Update authorizer allow-list in serverless.yml"
+  Phase bead:  "Phase 3: Tests"
+    Task bead: "Write unit tests for refresh handler"
+    Task bead: "Write integration test for full refresh flow"
+```
 
-| Level | Bead Type | Content |
-|-------|-----------|---------|
-| Root | Genesis bead | References the plan document. Ties all phases. Closed when all phases close. |
-| Mid | Phase bead | One coherent unit of work. Own acceptance criteria. Own child tasks. Phase boundary = a condition, not a date. |
-| Leaf | Task bead | Atomic work a single worker can complete in one session. One file, one function, one test suite. |
-
-### Writing a Good Bead Body
-
-Workers cannot ask clarifying questions. The bead body is the complete spec.
-
-**Test:** "Could a stateless worker who has never spoken to me produce acceptable output on the first try from this bead alone?" If no, the bead needs more detail.
-
-**Required sections:**
-- **Scope:** What to do, stated precisely enough to determine in-scope vs out-of-scope
-- **Acceptance criteria:** Testable, not aspirational. "p99 latency under 200ms" not "should be fast"
-- **Files to touch:** Which files are in scope
-- **Known constraints:** Interfaces you cannot change, dependencies you cannot add
-- **Close command:** The literal `bf close` command at the bottom
-
-**Example well-formed bead body:**
+### Example Well-Formed Bead for Your Stack
 
 ```
 ## Scope
-Add rate limiting to the /api/auth endpoint. Limit: 10 requests per minute per IP.
-Do not touch any other endpoints.
+Add POST /auth/refresh handler in src/handlers/auth.js.
+Do not touch any other handlers or the authorizer.
+
+## Context
+Working directory: ~/Mac_Code/API--auth-refresh
+Branch: luther/auth-refresh
+Existing pattern to follow: src/handlers/auth/login.js
 
 ## Acceptance Criteria
-- The /api/auth endpoint returns HTTP 429 when limit is exceeded
-- The Retry-After header is present on 429 responses
-- Existing tests continue to pass
-- A test for the rate-limit path exists
+- POST /auth/refresh returns 200 with {token, expiresAt} on valid refresh token
+- Returns 401 with {error: "Invalid token"} on expired/invalid refresh token
+- Returns 400 on missing body fields
+- Uses dbReader() for token lookup, no manual database calls
+- console.log at top includes customer_id
+- All existing auth tests continue to pass
+- New tests cover 200, 401, and 400 paths
+- No files outside src/handlers/auth.js and tests/handlers/auth.test.js modified
 
 ## Files
-src/api/auth.rs — add rate limiting middleware
-tests/api/auth_test.rs — add rate limit test
+src/handlers/auth.js
+tests/handlers/auth.test.js
 
 ## Constraints
-Use the existing RateLimiter struct in src/middleware/rate_limit.rs.
-Do not add new dependencies.
+Use databaseConnections.js helpers only — never getSecret, getParam, or new Database
+Match logging pattern from src/handlers/auth/login.js exactly
+Branch from staging, PR targets staging
 
 ## Close
-bf close nd-XXXX --body "Added rate limiting to /api/auth via RateLimiter middleware"
+bf close BEAD_ID --body "Added POST /auth/refresh handler with JWT validation. Tests: 8 passing."
 ```
 
 ---
@@ -422,158 +522,96 @@ bf close nd-XXXX --body "Added rate limiting to /api/auth via RateLimiter middle
 ### Starting a Single Worker
 
 ```bash
-cd /path/to/your/project
-
+cd ~/Mac_Code/API--feature   # always use the feature worktree
 needle run --agent claude-interactive --identity alpha
-
-# The worker will:
-#   1. Select the highest-priority claimable bead
-#   2. Claim it atomically (BEGIN IMMEDIATE transaction)
-#   3. Build the prompt from bead body + CLAUDE.md
-#   4. Dispatch to the agent CLI
-#   5. Wait for exit code
-#   6. Route the outcome, loop
 ```
 
 ### Starting a Fleet
 
 ```bash
-# Start 4 workers with staggered launches
-# IMPORTANT: stagger by 1-2 seconds to avoid thundering herd on first claim
 for identity in alpha bravo charlie delta; do
   tmux new-session -d -s "needle-$identity" \
-    "needle run --agent claude-interactive --identity $identity"
-  sleep 2
+    "cd ~/Mac_Code/API--feature && needle run --agent claude-interactive --identity $identity"
+  sleep 2    # stagger launches — prevents thundering herd on first claim
 done
 
-# Check worker status
 tmux list-sessions | grep needle
-
-# Attach to a worker session to observe
-tmux attach -t needle-alpha
-
-# Detach without killing: Ctrl+B, D
+tmux attach -t needle-alpha    # observe; Ctrl+B D to detach
 ```
 
 ### Fleet Size Limits
 
-Worker count must be bounded by the server's capacity for overhead operations — not by bead count.
-
-- On a 20-core Hetzner EX44 (production reference): max ~20 stable workers
-- At 40+ workers: the Explore strand's filesystem scans drove CPU load to 35+, degrading all workers
-- General guideline: workers ≤ CPU cores
+- 20-core server: max ~20 stable workers
+- At 40+: Explore strand filesystem scans drive CPU load unsustainably
+- Rule: workers ≤ CPU cores
 
 ### Worker Lifecycle
 
-Workers exit normally when their workspace has no claimable beads and `idle_timeout_seconds` elapses. This is expected behavior, not a crash. Either relaunch periodically or configure the Explore strand to find work in other workspaces automatically.
+Workers exit normally when their workspace has no claimable beads and `idle_timeout_seconds` elapses. This is expected, not a crash. Relaunch when new beads are created, or configure the Explore strand to find work in other workspaces.
 
 ---
 
 ## Known Failure Modes and How to Avoid Them
 
-These are extracted from `docs/notes/` in the NEEDLE repo — ten post-mortems from the Bash predecessor. The Rust rewrite was designed around these failures.
-
 ### 1. Mitosis Explosion (5,741 Duplicate Beads)
 
-The most catastrophic production incident. A chain of four silent failures produced 5,741 duplicate beads across five workspaces.
-
-**Root cause chain:**
-- `br show --json` never included labels (upstream bug). Every label-based guard silently returned empty.
-- Depth guard saw depth=0 always → `mitosis-parent` check never fired → `mitosis-pending` lock never worked.
-- No workspace context on `br update --blocked-by` → parents never blocked by children → re-claimed and re-split every 3 seconds.
-- No session-level loop guard, no hard limit on children → 5^6 = 15,625 potential beads from one parent.
+**Root cause chain:** `br show --json` never included labels → depth guard saw depth=0 → locks never worked → parents re-split every 3 seconds → exponential growth.
 
 **How to avoid:**
-- Always read labels with `bf label list BEAD_ID`, never `bf show --json`.
-- Do not enable mitosis until the core loop has been stable for at least one week.
-- When enabling mitosis, verify the depth guard is actually receiving label data before running at scale.
-- Build cleanup tooling (`bf batch-close --label mitosis-child`) before enabling mitosis. Cleanup must exist before the feature that can create messes.
+- Always read labels with `bf label list BEAD_ID`, never `bf show --json`
+- Do not enable mitosis until core loop is stable for one week
+- Build `bf batch-close --label mitosis-child` cleanup tooling before enabling mitosis
 
 ### 2. Worker Starvation False Positives (100% False Alarm Rate)
 
-Over one week, 16 starvation alert beads were created. Every single one was a false positive — the database typically showed 20–40 ready beads at alert time.
-
-**Root causes:**
-- Broken dependency filtering: `dependency_count == 0` excluded beads whose dependencies were all closed.
-- Debug logging to stdout corrupted JSON output in subshells — `jq` returned zero candidates.
-- Workers ran `br list` without `cd "$workspace"` first — queried the wrong database.
-- One `br` wrapper had a hardcoded path to a different workspace's database.
+**Root causes:** broken dependency filtering, debug logging to stdout, wrong workspace directory, hardcoded paths.
 
 **How to avoid:**
-- Never alert without independent verification via a different code path.
-- Distinguish "no work exists" from "all work is claimed" from "I cannot see the work" — three different responses.
-- Before trusting any starvation signal, verify with `bf list --status open`.
+- Distinguish "no work exists" from "all work is claimed" from "I cannot see the work"
+- Verify with `bf list --status open` before trusting any starvation signal
 
 ### 3. Claim Race Conditions (Five Distinct Races)
 
-This is why bead-forge exists. All five races are solved by `bf claim` (atomic `BEGIN IMMEDIATE` transaction). The key races to understand:
-
-- **Thundering herd:** All workers attempt to claim the same top bead simultaneously. → Solved by `bf claim`.
-- **TOCTOU on closed beads:** Worker B re-claims a bead Worker A already closed. → Solved by atomic transactions.
-- **Mitosis split storm:** Two workers simultaneously analyze the same bead for splitting. → Solved by writing `mitosis-pending` label before the LLM call, not after.
-- **Mitosis-parent re-claim loop:** Parent returns to ready queue every 3 seconds because `--blocked-by` call silently failed. → Solved by pre-claim label filtering.
-- **Parent labeled after children:** Race window between child creation and parent labeling. → Solved by labeling parent before creating any children.
+All solved by `bf claim` (atomic `BEGIN IMMEDIATE` transaction). Use `bf claim --assignee alpha --format json` — never `br list` + `br update` in sequence.
 
 ### 4. Self-Modification Risks
 
-NEEDLE workers write code. When workers are assigned beads to implement NEEDLE itself, feedback loops emerge.
-
-**The four incidents:**
-- Workers modified `build.sh`, committed a broken binary, hot-reload deployed it to the entire fleet simultaneously.
-- A bad commit propagated to all workers within seconds via hot-reload + `needle upgrade`.
-- Weave strand with no bead-creation cap ran on the NEEDLE workspace, creating an infinite improvement loop.
-- Workers split their own mitosis feature — producing thousands of task-splitting tasks.
-
-**Rules:**
-- Never auto-deploy changes to the NEEDLE binary without human approval.
-- If using NEEDLE to develop NEEDLE: pin workers to a specific version during work sessions.
-- Weave strand must have a hard bead-creation bound. Start with max 10 beads per weave run.
-- Weave on the NEEDLE workspace itself should be disabled entirely until fully stable.
+If you use NEEDLE to work on your own tooling/config repos:
+- Never auto-deploy changes to the NEEDLE binary without human approval
+- Weave strand on config repos must have a hard bead-creation bound
+- Pin workers to a specific version when they're working on the orchestration layer itself
 
 ---
 
 ## Observability
 
-A silent worker is a broken worker.
+### Fleet Health Commands
 
-### Exported Signals
+```bash
+needle status                           # worker status and queue depth
+needle status --idle-strands            # check if all strand gates are closed
+bf list --status open | head -20        # inspect queue directly
+bf stats                                # queue statistics
+```
 
-- **Traces:** `worker.session`, `bead.lifecycle`, `bead.claim`, `agent.dispatch`, `strand.evaluated`, `outcome.handled`
-- **Metrics:** `needle.beads.completed`, `needle.beads.duration`, `needle.agent.tokens.input`, `needle.cost.usd`
-- **Logs:** All events not represented as spans, with severity mapping
-
-### Enable Telemetry
-
-In `.needle.yaml`:
+### Enable Telemetry (in `.needle.yaml`)
 
 ```yaml
 telemetry:
   otlp_sink:
     enabled: true
-    endpoint: "http://localhost:4317"    # gRPC
-    protocol: "grpc"                     # or "http" for :4318
-```
-
-### Fleet Health Commands
-
-```bash
-needle status                           # worker status and queue depth
-needle status --idle-strands            # strand gate status across all workspaces
-needle status --idle-strands --format json   # for scripting
-
-bf list --status open | head -20        # inspect queue directly
-bf stats                                # queue statistics
+    endpoint: "http://localhost:4317"
+    protocol: "grpc"
 ```
 
 ### Cost Governance
 
-**Three execution bounds every worker should have** (configure in `.needle.yaml` under `worker:`):
+Three execution bounds (in `.needle.yaml` under `worker:`):
+- `max_execution_minutes: 30` — wall-clock timeout per bead
+- `max_output_tokens: 100000` — output token cap per bead
+- `max_model_calls: 50` — model invocation cap per bead
 
-- **Time bound** (`max_execution_minutes`): Kill any worker running on the same bead longer than N minutes.
-- **Token bound** (`max_output_tokens`): Kill any worker that has emitted more than N output tokens on a single bead.
-- **Iteration bound** (`max_model_calls`): Kill any worker that has invoked the model more than N times on a single bead.
-
-These convert "worker decides when to stop" to "orchestrator decides when to stop." A killed worker releases the bead back to the queue and retries. The cost of a wasted bounded run is one bounded run. The cost of an unwatched runaway is unbounded.
+Any bound tripped → worker killed → bead released → retried.
 
 ---
 
@@ -584,46 +622,126 @@ Follow this sequence. Do not skip steps or reorder them.
 ### Phase 1: Install Prerequisites
 
 1. Install Rust 1.75+
-2. Build and install bead-forge: `cargo install --git https://github.com/jedarden/bead-forge`
+2. Build bead-forge: `cargo install --git https://github.com/jedarden/bead-forge`
 3. Symlink: `ln -sf $(which bf) ~/.local/bin/br`
 4. Install tmux
-5. Install Claude Code CLI and verify: `which claude`
-6. Install claude-interactive plugin (if using subscription billing). Verify Python 3.10+, install `pyte`.
-7. Build and install NEEDLE: `cargo install --git https://github.com/jedarden/NEEDLE`
-8. Verify all three: `needle --version`, `bf --version`, `br --version`
+5. Install Claude Code CLI: `which claude`
+6. Install claude-interactive plugin (Python 3.10+, `pip install pyte`)
+7. Build NEEDLE: `cargo install --git https://github.com/jedarden/NEEDLE`
+8. Verify: `needle --version`, `bf --version`, `br --version`
 
-### Phase 2: Initialize Workspace
+### Phase 2: Initialize First Workspace
 
-1. Run `bf init` in the project root
-2. Edit `.beads/config.yaml` — set `issue_prefixes` for your project
-3. Create `.needle.yaml` — set agent, idle_timeout, disable Weave/Pulse/Unravel
-4. Create `CLAUDE.md` — overview, bead workflow, code style, testing, commit conventions, architecture
-5. Add `.beads/beads.db` to `.gitignore`
+1. Pick a feature worktree you're actively working on in kiro-config
+2. Run `bf init` in that worktree
+3. Configure `.beads/config.yaml` with your `mb` prefix
+4. Create `.needle.yaml` — agent, timeouts, disable Weave/Pulse/Unravel
+5. Create `CLAUDE.md` from your steering files (tech.md + code-standards.md + git-workflow.md)
+6. Add `.beads/beads.db` to `.gitignore`
 
-### Phase 3: Create First Beads
+### Phase 3: Convert a plan.md to Beads
 
-1. Create a genesis bead: `bf create "Project name" -p 0 --type epic`
-2. Create 3–5 task beads with well-formed bodies (scope, acceptance criteria, files, constraints, close command)
-3. Verify beads are visible: `bf list --status open`
-4. Verify priority ordering: `bf ready`
+1. Take a feature you've already planned with `/orchestrate`
+2. Open the `plan.md` from `~/.kiro/memory/features/<feature>/plan.md`
+3. For each unchecked item, run `bf create` with a well-formed bead body
+4. Add `bf dep add` links where ordering matters
+5. Add HUMAN beads for any migrations or deploys
+6. Verify: `bf list --status open`, `bf ready`
 
 ### Phase 4: Run First Worker
 
-1. Start a single worker: `needle run --agent claude-interactive --identity alpha`
+1. Start single worker: `needle run --agent claude-interactive --identity alpha`
 2. Watch it claim and process the first bead
-3. Verify the bead closes correctly: `bf show BEAD_ID`
-4. Verify the learnings file updates: `cat .beads/learnings.md`
+3. Verify bead closes: `bf show BEAD_ID`
+4. Verify learnings: `cat .beads/learnings.md`
+5. Review the output — does it match your code standards?
 
 ### Phase 5: Scale to Fleet
 
-1. Only after Phase 4 is working cleanly
+1. Only after Phase 4 output passes your quality bar
 2. Install claude-governor if using API billing
-3. Launch 3–4 workers with staggered starts (sleep 2 between each)
-4. Verify no thundering herd: `bf stats` — confirm different workers claimed different beads
-5. Enable the Explore strand if running multiple workspaces
-6. Set up OTLP observability if desired
+3. Launch 3–4 workers with staggered starts
+4. Verify no thundering herd: `bf stats` — different workers claimed different beads
+5. Run gstack `/cso` on the output before creating a PR
 
-At the end of Phase 5 you have a working cattle fleet: multiple stateless headless workers processing a shared bead queue in deterministic order, with every outcome routed through an explicit handler, and cost governance preventing runaway spend.
+---
+
+## CI/CD for Your Stack
+
+You have GitHub Actions already. Three additions needed:
+
+### Build Validation
+
+```yaml
+# .github/workflows/ci.yml
+name: CI
+on:
+  push:
+    branches: [staging]
+  pull_request:
+    branches: [staging]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.75"
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+      - run: cargo build --release
+      - run: cargo test
+      - run: cargo clippy -- -D warnings
+```
+
+### Integration Smoke Test
+
+```yaml
+  integration:
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    steps:
+      - uses: actions/checkout@v4
+      - run: cargo install --git https://github.com/jedarden/bead-forge
+      - run: cargo install --git https://github.com/jedarden/NEEDLE
+      - run: ln -sf $(which bf) ~/.local/bin/br
+      - name: Fixture workspace
+        run: |
+          mkdir -p /tmp/needle-fixture && cd /tmp/needle-fixture
+          bf init
+          bf create "Smoke test" -p 0 --type task \
+            --body "Write SMOKE_TEST_PASSED to /tmp/needle-fixture/result.txt"
+      - name: Run worker (echo agent)
+        run: cd /tmp/needle-fixture && needle run --agent echo --identity ci --once
+        timeout-minutes: 2
+      - run: grep SMOKE_TEST_PASSED /tmp/needle-fixture/result.txt
+```
+
+### Protect Orchestration Files
+
+```yaml
+  protect-needle-binary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - name: Block changes to orchestration layer without approval
+        run: |
+          CHANGED=$(git diff --name-only HEAD~1 HEAD)
+          for file in build.sh Cargo.toml .needle.yaml; do
+            if echo "$CHANGED" | grep -q "^$file"; then
+              echo "Protected file changed: $file — requires manual review"
+              exit 1
+            fi
+          done
+```
 
 ---
 
@@ -633,35 +751,35 @@ At the end of Phase 5 you have a working cattle fleet: multiple stateless headle
 
 | Command | Purpose |
 |---------|---------|
-| `bf init` | Initialize a new bead queue in the current directory |
+| `bf init` | Initialize bead queue in current directory |
 | `bf create "Title" -p 0 --type task` | Create a P0 task bead |
-| `bf claim --assignee alpha --format json` | Atomically claim the next available bead |
+| `bf claim --assignee alpha --format json` | Atomically claim next bead |
 | `bf list --status open` | List open beads |
-| `bf ready` | List beads with no open blockers (actionable queue) |
+| `bf ready` | List beads with no open blockers |
 | `bf show BEAD_ID` | View full bead details |
-| `bf close BEAD_ID --body "Summary"` | Close a bead with a completion summary |
-| `bf update BEAD_ID --status blocked --body "Reason"` | Mark a bead as blocked |
+| `bf close BEAD_ID --body "Summary"` | Close a bead |
+| `bf update BEAD_ID --status blocked --body "Reason"` | Mark blocked |
 | `bf label list BEAD_ID` | Read labels (use this, NOT `bf show --json`) |
-| `bf dep add CHILD_ID PARENT_ID` | Add a blocking dependency |
+| `bf dep add CHILD_ID PARENT_ID` | Add blocking dependency |
 | `bf stats` | Queue statistics |
-| `needle run --agent claude-interactive --identity alpha` | Start a named worker |
+| `needle run --agent claude-interactive --identity alpha` | Start named worker |
 | `needle status` | Worker and queue health |
-| `needle status --idle-strands` | Strand gate status across all workspaces |
-| `bv --robot-triage` | Structured triage output for agents |
-| `bv --robot-next` | Top pick + exact claim command (minimum tokens) |
+| `needle status --idle-strands` | Strand gate status |
+| `bv --robot-triage` | Structured triage for agents |
+| `bv --robot-next` | Top pick + exact claim command |
 
 ### Repository URLs
 
 | Project | URL | Required? |
 |---------|-----|-----------|
-| NEEDLE | https://github.com/jedarden/NEEDLE | Yes — the orchestrator |
-| bead-forge (`bf`) | https://github.com/jedarden/bead-forge | Yes — the `br` replacement |
-| beads (`bd`) | https://github.com/steveyegge/beads | No — upstream ecosystem reference |
-| beads_viewer (`bv`) | https://github.com/jedarden/beads_viewer | Optional — TUI dashboard |
-| claude-governor | https://github.com/jedarden/claude-governor | Recommended for API billing |
-| ccdash | https://github.com/jedarden/ccdash | Optional — fleet monitoring TUI |
-| CLASP | https://github.com/jedarden/CLASP | Optional — multi-provider proxy |
-| agentists-quickstart | https://github.com/jedarden/agentists-quickstart | Optional — DevPod workspaces |
+| NEEDLE | https://github.com/jedarden/NEEDLE | Yes |
+| bead-forge (`bf`) | https://github.com/jedarden/bead-forge | Yes |
+| beads (`bd`) | https://github.com/steveyegge/beads | No — reference only |
+| beads_viewer (`bv`) | https://github.com/jedarden/beads_viewer | Optional |
+| claude-governor | https://github.com/jedarden/claude-governor | Recommended |
+| ccdash | https://github.com/jedarden/ccdash | Optional |
+| gstack | https://github.com/garrytan/gstack | Companion — think & verify layer |
+| kiro-config | https://github.com/LutherCalvinRiggs/kiro-config | Your existing pet model |
 
 ### File Locations
 
@@ -670,187 +788,16 @@ At the end of Phase 5 you have a working cattle fleet: multiple stateless headle
 | `.beads/` | Bead queue (workspace-local) |
 | `.beads/issues.jsonl` | Append-only source of truth. **Commit this.** |
 | `.beads/beads.db` | SQLite cache. **Do NOT commit.** Add to `.gitignore`. |
-| `.beads/config.yaml` | Workspace config including NEEDLE-specific keys |
-| `.beads/learnings.md` | Auto-managed by NEEDLE. Captures lessons from completed beads. |
-| `.needle.yaml` | NEEDLE worker configuration (agents, strands, timeouts) |
-| `CLAUDE.md` | Project instructions every worker reads on start |
-| `docs/notes/` | Post-mortems and operational lessons (NEEDLE repo — read these before writing any code) |
-
-
----
-
-## CI/CD Without Jed's Argo Workflows
-
-NEEDLE's own CI runs on Kubernetes via Argo Workflows — Jed's personal infra. That setup is not portable. You need to substitute your own CI approach. The good news: NEEDLE does not require CI to run. It is an orchestrator that runs locally or on a server. CI is about validating the code your workers produce, not running NEEDLE itself.
-
-### What NEEDLE's CI Actually Does
-
-From the repo's `.github/workflows/` and Argo config, NEEDLE's CI pipeline does three things:
-
-1. **Build validation** — `cargo build --release` to confirm the binary compiles after worker changes
-2. **Test suite** — `cargo test` across all modules
-3. **Integration smoke test** — spin up a single worker against a fixture workspace with pre-seeded beads, verify it claims and closes them correctly, check exit code
-
-You need equivalents for all three.
-
-### Option A: GitHub Actions (Recommended Starting Point)
-
-The simplest substitute. Free for public repos, 2,000 minutes/month for private.
-
-```yaml
-# .github/workflows/ci.yml
-name: CI
-
-on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
-
-jobs:
-  build-and-test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: "1.75"
-
-      - name: Cache cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-
-      - name: Build
-        run: cargo build --release
-
-      - name: Test
-        run: cargo test
-
-      - name: Lint
-        run: cargo clippy -- -D warnings
-```
-
-**What this does not cover:** the integration smoke test (claiming and closing real beads) — that requires `bf` and a real `.beads/` fixture. Add it in Phase 2 once the basic pipeline is green.
-
-### Option B: Integration Smoke Test (Phase 2 Addition)
-
-Once the build/test pipeline is stable, add a smoke test that actually exercises the full claim→close loop. This catches regressions that unit tests miss (wrong workspace path, broken agent adapter YAML, silent `bf` invocation failures).
-
-```yaml
-  integration:
-    runs-on: ubuntu-latest
-    needs: build-and-test
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: "1.75"
-
-      - name: Build bead-forge
-        run: cargo install --git https://github.com/jedarden/bead-forge
-
-      - name: Build NEEDLE
-        run: cargo install --git https://github.com/jedarden/NEEDLE
-
-      - name: Symlink br → bf
-        run: ln -sf $(which bf) ~/.local/bin/br
-
-      - name: Initialize fixture workspace
-        run: |
-          mkdir -p /tmp/needle-fixture
-          cd /tmp/needle-fixture
-          bf init
-          bf create "Smoke test bead" -p 0 --type task \
-            --body "Write the string SMOKE_TEST_PASSED to /tmp/needle-fixture/result.txt"
-
-      - name: Run worker (echo agent)
-        run: |
-          cd /tmp/needle-fixture
-          needle run --agent echo --identity ci --once
-        timeout-minutes: 2
-
-      - name: Verify result
-        run: grep SMOKE_TEST_PASSED /tmp/needle-fixture/result.txt
-```
-
-> **Note on the echo agent:** NEEDLE's agent adapter system lets you define a YAML adapter that calls any command. For CI, define an `echo` adapter that writes deterministic output and exits 0 — no LLM call required. This tests the claim/dispatch/outcome machinery without API costs or flakiness.
-
-**Echo adapter YAML** (save as `.needle/adapters/echo.yaml` in your workspace):
-
-```yaml
-name: echo
-description: Deterministic CI adapter — no LLM
-invoke: echo "SMOKE_TEST_PASSED" > /tmp/needle-fixture/result.txt && bf close {bead_id} --body "ci"
-```
-
-### Option C: Self-Hosted Runner on Your NEEDLE Server
-
-If you are running NEEDLE on a dedicated server (Hetzner, etc.), running CI there eliminates the round-trip to GitHub's runners and lets you test against real hardware limits.
-
-```bash
-# On your server — install the GitHub Actions runner
-mkdir actions-runner && cd actions-runner
-curl -o actions-runner-linux-x64.tar.gz -L \
-  https://github.com/actions/runner/releases/download/v2.317.0/actions-runner-linux-x64-2.317.0.tar.gz
-tar xzf actions-runner-linux-x64.tar.gz
-./config.sh --url https://github.com/YOUR_ORG/YOUR_REPO --token YOUR_TOKEN
-./run.sh
-```
-
-Then in your workflow, change `runs-on: ubuntu-latest` to `runs-on: self-hosted`.
-
-**Tradeoff:** Faster and cheaper at scale, but your CI and your NEEDLE fleet compete for the same CPU and SQLite. Run CI jobs with `nice -n 19` to de-prioritize them relative to live workers.
-
-### What to Validate in CI vs. What to Leave to Workers
-
-| Concern | Where to handle it |
-|---------|-------------------|
-| Does NEEDLE compile? | CI |
-| Do unit tests pass? | CI |
-| Does the claim→close loop work mechanically? | CI (echo adapter smoke test) |
-| Does the agent produce correct output? | Bead acceptance criteria + validation gate |
-| Does the agent produce good code? | Human review of closed beads |
-| Did workers introduce regressions? | Your existing test suite, run as a bead |
-
-CI verifies the machinery. Workers verify the output. Keep them separate.
-
-### Protecting the NEEDLE Binary from Worker Modification
-
-One of the documented self-modification incidents: workers modified `build.sh`, the CI pipeline ran, produced a broken binary, and hot-reload deployed it to the entire fleet simultaneously.
-
-Add a protection rule in CI:
-
-```yaml
-  protect-needle-binary:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 2
-
-      - name: Fail if orchestration files changed without approval
-        run: |
-          CHANGED=$(git diff --name-only HEAD~1 HEAD)
-          for file in build.sh Cargo.toml .needle.yaml; do
-            if echo "$CHANGED" | grep -q "^$file"; then
-              echo "Protected orchestration file changed: $file"
-              echo "Requires manual review before merge."
-              exit 1
-            fi
-          done
-```
-
-This blocks automated merges of any PR that touches the orchestration layer — even if a worker opened the PR. A human must explicitly approve and remove the block.
+| `.beads/config.yaml` | Workspace config |
+| `.beads/learnings.md` | Auto-managed. Captures worker learnings. |
+| `.needle.yaml` | NEEDLE worker configuration |
+| `CLAUDE.md` | Project instructions every worker reads — build from your steering files |
+| `~/.kiro/memory/features/<name>/plan.md` | Source for bead decomposition |
+| `~/.kiro/steering/` | Source for CLAUDE.md content |
+| `docs/notes/` | Post-mortems and lessons (NEEDLE repo — read before writing any code) |
 
 ---
 
 *NEEDLE v0.2.6 · MIT License · github.com/jedarden/NEEDLE*
+*kiro-config · github.com/LutherCalvinRiggs/kiro-config*
+*gstack · github.com/garrytan/gstack*
