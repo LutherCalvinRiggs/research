@@ -1,6 +1,6 @@
 # How to Actually Set Up Claude Projects — The 6-Part Blueprint
 
-**Source:** https://x.com/0xcodez/status/2062127385923776831 (pasted content by @eng_khairallah1)
+**Source:** https://x.com/eng_khairallah1/status/2063186252606865711
 **Saved:** 2026-06-07
 **Tags:** ai, productivity, prompting, tools, claude, learning
 
