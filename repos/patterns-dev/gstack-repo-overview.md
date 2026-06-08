@@ -9,13 +9,26 @@
 ---
 
 ## TL;DR
-gstack turns Claude Code into a virtual engineering team by giving it 23 specialist roles and 8 power tools as slash commands. A persistent headless Chromium browser daemon, a "gbrain" memory layer, multi-agent review pipelines, and an ETHOS system that injects builder principles into every skill. Works on 10 AI coding agents (Claude Code, Codex, OpenCode, Cursor, Factory, Slate, Kiro, OpenClaw, Hermes, gbrain). MIT licensed, free, used daily by its author.
+gstack turns Claude Code into a virtual engineering team by giving it 23 specialist roles and 8 power tools as slash commands. A persistent headless Chromium browser daemon, a "gbrain" memory layer, multi-agent review pipelines, and an ETHOS system that injects builder principles into every skill. Works on 10 AI coding agents (Claude Code, Codex, OpenCode, Cursor, Factory, Slate, Kiro, OpenClaw, Hermes, gbrain). MIT licensed, free, used daily by its author. 108,000 GitHub stars, 16,000+ forks.
 
 ## Key Metrics
+- **108,000** GitHub stars, **16,000+** forks
 - **810×** Garry Tan's 2026 logical code velocity vs 2013 baseline
 - **240×** the entire 2013 year's output, in YTD 2026 alone (through April 18)
 - **3 production services, 40+ shipped features** in 60 days, part-time while running YC full-time
 - **1,237 GitHub contributions** Jan–Apr 2026 vs 772 in all of 2013
+- **3–5 hours/day** saved on routine work, per user reports
+
+
+## The Workflow Phase Model
+
+gstack organizes work around the phases every product goes through whether you acknowledge them or not:
+
+```
+Think → Plan → Build → Review → Test → Ship → Reflect
+```
+
+Each skill handles one phase and passes its output to the next — so context doesn't have to be re-explained at every step. The key insight is that most developers skip the Think and Plan phases entirely, jumping straight to Build. `/office-hours` and `/plan-ceo-review` are the structural fix for that.
 
 ## Key Concepts & Terms
 - **Skill**: A Markdown file (`SKILL.md`) that gives Claude Code a named role with a defined workflow, allowed tools, triggers, and preamble bash script. Invoked as `/skill-name`.
@@ -110,6 +123,18 @@ git clone --single-branch --depth 1 https://github.com/garrytan/gstack.git \
 
 **Requirements:** Claude Code, Git, Bun v1.0+, Node.js (Windows only)
 
+
+**Add to your `CLAUDE.md`** so Claude Code knows the skills exist:
+```markdown
+## gstack
+Use /browse from gstack for all web browsing.
+
+Available skills:
+/office-hours, /plan-ceo-review, /plan-eng-review,
+/design-shotgun, /design-html, /review, /ship,
+/qa, /document-release, /autoplan, /pair-agent
+```
+
 **Team mode** (auto-updates for all teammates):
 ```bash
 (cd ~/.claude/skills/gstack && ./setup --team) && \
@@ -157,6 +182,19 @@ AI models recommend. Users decide. The generation-verification loop: AI generate
 ## Related Projects
 - **OpenClaw** (github.com/openclaw/openclaw) — 247K stars, dispatches Claude Code sessions via ACP. gstack skills work natively when Claude Code has gstack installed.
 - **gbrain** — Memory/knowledge layer. Supabase-backed or local PGLite.
+
+
+## Real-World Proof: The Cursor Hackathon
+
+**Rakhatbek Zholdoshkanov**, 18, CS student at San Francisco State University, flew back to Bishkek for the Cursor Hackathon and won it as team lead. 81 participants, 27 teams, 2-hour build window.
+
+**What he built:** Pixel Bishkek — a pixel-art map of the city with interactive locations, mini-games, and real-time multiplayer. Features: a karaoke mini-game with computer vision hand-tracking, akok-boru competition mode, interactive scenarios across city locations. Image generation and pixel art done with AI tools. Stack: Cursor, Supabase, Vercel.
+
+**How gstack helped:** `/office-hours` compressed the 30 minutes most teams spend debating what to build into 5 minutes of structured forcing questions. His team had a clear direction before anyone else had started. He handled ~90% of the technical development himself.
+
+His verdict: *"Without AI tools it would have been practically impossible to build a game like this in 1 hour 45 minutes manually."*
+
+The jury was most impressed by the visual style, the multiplayer, and the computer vision elements. The project went live the same day.
 
 ## Questions & Gaps for My Implementation
 - How does gstack's `/learn` skill and gbrain memory interact with a NEEDLE bead queue? The two systems both capture project learnings but in different formats (`.jsonl` vs `.beads/learnings.md`).
