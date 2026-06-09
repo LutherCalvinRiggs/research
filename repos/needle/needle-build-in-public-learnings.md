@@ -140,6 +140,61 @@ The explicit rule the team added: when an expected field is absent, fail loudly 
 
 > "Cleanup tooling must exist before the feature that can create messes."
 
+
+## 8. Explore Strand Bugs (4 Distinct Issues)
+
+New post-mortem added in v0.2.7. The explore strand (filesystem search for other workspaces) had four production bugs:
+
+**Bug 1 — Unbounded find**: Phase 1 used `find` with no depth limit, Phase 2 walked all the way to `/`. With 40+ idle workers running simultaneously, CPU load hit 35+ on a 20-core machine. Fix: `explore.max_depth` (default 3) and `explore.max_upward_depth` (default 3) config keys.
+
+**Bug 2 — Dotfile directories**: Explore searched `.git`, `.npm`, `.cache`, `.nvm` etc. `.git/objects` alone contains hundreds of thousands of files. Fix: `-not -path '*/\.*'` exclusion.
+
+**Bug 3 — Worker bouncing between workspaces**: When a worker's home workspace had only `in_progress` beads (claimed by other workers), explore treated it as "done" and moved the worker away. When it returned, same situation → infinite bounce. Fix: skip exploring when home workspace has any `in_progress` beads.
+
+**Bug 4 — Explore as accidental load generator**: The operational consequence of bugs 1-2. With 40+ workers, the `find` command alone consumed most of the server's I/O capacity.
+
+**Implementation lessons**: (1) Always bound filesystem traversal with explicit depth limits and exclusion patterns. (2) Cache workspace discovery results — inotify or periodic refresh, not re-scan every iteration. (3) Prefer explicit workspace config over auto-discovery. (4) Workers should stay in their assigned workspace — workspace-switching logic added complexity and caused the bounce bug.
+
+## 9. Bundler and Build Integrity (8 Distinct Bugs — Bash Era)
+
+New post-mortem documenting the structural fragility of NEEDLE-deprecated's Bash build system. The binary was 50+ bash files concatenated into a single script. This produced 8 distinct bug classes:
+
+- **35 missing modules**: Manual `MODULES=()` list in build script — new files weren't automatically included
+- **Source guards breaking the bundled binary**: `_NEEDLE_*_LOADED=true` pattern fires immediately on concatenation, skipping all function definitions. Symptom: `_needle_verify_bead: command not found`
+- **Bare `return 0` at top level**: In a `source` context it exits the source call. In a concatenated binary it terminates the entire script at that point
+- **Invalid bash syntax from concatenation**: Empty if-then-else blocks (comment-only bodies) produce syntax errors when stripped
+- **Missing lock functions**: `locks.sh` existed in source tree but wasn't in the module list — all workers failed on every claim attempt with `command not found`
+- **bundle.sh vs build.sh confusion**: Two build scripts with different semantics; using the wrong one deployed a stub that tried to source non-existent files
+- **Missing stream-parser**: `stream-parser.sh` not embedded — workers couldn't parse agent output, breaking telemetry and heartbeats
+- **Constants version mismatch**: Version string not updated when build version bumped
+
+**Root cause of all 8**: The build process had no automated validation — it was a concatenation tool, not a build system. No verification that all referenced functions were defined, no syntax checking, no manifest validation.
+
+**Why Rust fixed this**: Cargo's module system, exhaustive match enforcement, and `cargo build` providing a real compiler eliminated this entire class of bugs structurally.
+
+## 10. Reflect Strand — Learning Consolidation (New in v0.2.7)
+
+A new ninth strand (strand 7, before Knot) that NEEDLE-deprecated never had. Runs after all other productive strands return `NoWork`. Four-phase cycle:
+
+1. **Orient** — reads `learnings.md` and existing skill files, checks sizes
+2. **Gather** — reads bead close bodies from `issues.jsonl` since last consolidation; reads traces for failed beads
+3. **Consolidate** — extracts retrospective blocks, identifies cross-bead patterns, merges into `learnings.md`, deduplicates, resolves contradictions. Promotes learnings with `reinforcement_count ≥ 3` to skill files in `.beads/skills/`
+4. **Prune** — removes entries older than `learning_retention_days` without reinforcement, compresses similar entries, enforces `max_learnings`
+
+Entry conditions: `strands.reflect.enabled = true`, 10+ beads closed since last consolidation, 24+ hour cooldown.
+
+Guardrails: `max_learnings_per_run`, `max_skills_per_run`. CLAUDE.md is read-only — never written by Reflect.
+
+**Evidence from production**: The `.beads/learnings.md` in the repo already has 10 entries captured from workers `bravo`, `india`, `alpha`, `charlie`, `juliet` across beads `needle-wysd.2.3`, `needle-49vt`, `needle-jy7b`, `needle-ry21.1`, `needle-9hu7`, `needle-vqm7`. Real worker learnings like "For new modules: create src/module/mod.rs, add to lib.rs" and "The telemetry infrastructure was already well-designed — only the actual emission call was missing."
+
+## 11. Splice Strand — Failure Documentation (New in v0.2.7)
+
+Strand 8 in the waterfall (before Knot). Scans heartbeat files for workers with stale heartbeats whose tmux sessions are dead, and creates a failure report bead for each undocumented failure. Also detects live-but-looping workers (claim churn, state ping-pong, log runaway).
+
+State persistence via `splice_state.json` tracks already-documented session IDs, preventing duplicate failure beads.
+
+This is the automated version of what the "100% false-positive starvation alerts" post-mortem described as a manual pain point — workers failing silently with no trail. Splice closes that gap.
+
 ## Questions & Gaps
 - How mature is the Rust rewrite vs. deprecated Bash version? The docs/notes/ are lessons *from* the Bash version fed *into* the Rust rewrite — the Rust version may not have re-hit all these bugs.
 - The `br show --json` label bug was upstream in beads_rust — is that fixed in the current version? This is a hard dependency.
