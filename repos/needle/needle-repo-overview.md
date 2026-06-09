@@ -9,13 +9,13 @@
 ---
 
 ## TL;DR
-NEEDLE (Navigates Every Enqueued Deliverable, Logs Effort) is a Rust binary that wraps any headless coding CLI (Claude Code, OpenCode, Codex, Aider) in a deterministic state machine. It processes a shared bead queue via SQLite atomic claims, dispatches work to agents, and routes every possible outcome through an explicit handler. No wildcards. No swallowed errors. Currently v0.2.6, MIT licensed, used in production by the author.
+NEEDLE (Navigates Every Enqueued Deliverable, Logs Effort) is a Rust binary that wraps any headless coding CLI (Claude Code, OpenCode, Codex, Aider) in a deterministic state machine. It processes a shared bead queue via SQLite atomic claims, dispatches work to agents, and routes every possible outcome through an explicit handler. No wildcards. No swallowed errors. Currently v0.2.7, MIT licensed, used in production by the author. Now has 9 strands including Reflect (learning consolidation) and Splice (failure documentation).
 
 ## Key Concepts & Terms
 - **Bead**: An atomic unit of work tracked in a SQLite database (`.beads/beads.db`). Has title, body, status (`open` → `in_progress` → `closed`), priority, labels, and dependency links. Managed by the `br` CLI (beads_rust, a separate project).
 - **Bead queue**: The `.beads/` directory in a workspace. All workers share the same queue; SQLite transactions serialize claims.
 - **Worker**: A single NEEDLE process running the six-step loop inside a tmux session. Multiple workers run concurrently against the same queue with no central orchestrator.
-- **Strand**: What NEEDLE does when the primary queue is exhausted. Seven strands evaluated in waterfall order: Pluck (primary work) → Explore (other workspaces) → Mend (cleanup) → Weave (gap creation, opt-in) → Unravel (propose alternatives, opt-in) → Pulse (health scans, opt-in) → Knot (exhausted, alert human).
+- **Strand**: What NEEDLE does when the primary queue is exhausted. Nine strands evaluated in waterfall order: Pluck → Explore → Mend → Weave (opt-in) → Unravel (opt-in) → Pulse (opt-in) → Reflect (opt-in, learning consolidation) → Splice (opt-in, failure documentation) → Knot (alert human).
 - **Agent adapter**: A YAML file that tells NEEDLE how to invoke a specific CLI. Adding a new agent = writing one YAML file, no code changes.
 - **Genesis bead**: The root bead for a multi-phase project. References the plan document. Phase beads and task beads descend from it.
 - **Mitosis**: Automatic task decomposition — a bead that's too large gets split into children by the LLM. Has been the source of the most catastrophic production incidents.
@@ -63,7 +63,7 @@ src/
   claim/         # Atomic bead claiming via SQLite
   dispatch/      # Agent invocation + YAML adapter loading
   outcome/       # Explicit handler per outcome type
-  strand/        # pluck/explore/mend/weave/knot/pulse/reflect/unravel
+  strand/        # pluck/explore/mend/weave/knot/pulse/reflect/unravel/splice
   decision/      # Outcome classification from exit code + output
   mitosis/       # Worker spawn and task decomposition
   health/        # Liveness, stale-claim cleanup, watchdog
@@ -76,7 +76,8 @@ src/
   sanitize/      # Output redaction and prompt-injection guards
   validation/    # Pre-dispatch and post-execution checks
 
-docs/notes/      # 10 build-in-public post-mortems and lessons (gold mine)
+docs/notes/      # 12 build-in-public post-mortems and lessons (gold mine)
+docs/research/   # Research docs on beads ecosystem, orchestration patterns, spec2beads
 .beads/          # Live bead queue, learnings, skills, traces
 plugins/claude-interactive/  # PTY wrapper for subscription billing
 ```
@@ -130,13 +131,14 @@ From `.beads/config.yaml`:
 - **[CLASP](https://github.com/jedarden/CLASP)** — proxy letting Claude Code target any LLM backend
 - **[agentists-quickstart](https://github.com/jedarden/agentists-quickstart)** — DevPod workspaces for Claude Code + NEEDLE
 - **beads_rust** — the `br` CLI that manages the bead database (separate project, upstream dependency)
+- **[spec2beads](https://github.com/dcarmitage/spec2beads)** — Claude Code skill that decomposes product specifications into dependency-aware beads. Bridges "what we want to build" → bead queue → NEEDLE execution. Directly relevant to the kiro-config/NEEDLE integration: plan.md → spec2beads → beads.
 
 ## Questions & Gaps for My Implementation
 - The `br` CLI is a separate project — need to find/build beads_rust first. This is a hard dependency.
 - The claude-interactive PTY plugin requires Python 3.10+ and `pyte` — where is the upstream source? Is it `pip`-installable?
 - K8s CI via Argo Workflows is specific to Jed's infra — need to substitute a local CI approach.
 - Worker count recommendation: bound by server capacity for overhead ops (explore's filesystem scans), not bead count. 20 workers was the ceiling on a 20-core Hetzner EX44.
-- The Weave/Pulse/Unravel strands are opt-in and add significant complexity — start with just Pluck/Explore/Mend/Knot for MVP.
+- The Weave/Pulse/Unravel/Reflect/Splice strands are all opt-in. Start with just Pluck/Explore/Mend/Knot for MVP. Reflect is the most valuable of the opt-in strands once the core loop is stable — it continuously improves worker quality by consolidating learnings.
 
 ## Related Notes
 - [Pet Agents vs. Cattle Agents](https://github.com/LutherCalvinRiggs/research/blob/main/ai/productivity/pet-agents-vs-cattle-agents.md) — NEEDLE is the code implementation of this mental model
