@@ -62,7 +62,7 @@ Every NEEDLE worker executes this loop indefinitely until it times out or is kil
 
 ### Strand Escalation
 
-When the primary workspace has no claimable beads, NEEDLE evaluates seven strands in waterfall order:
+When the primary workspace has no claimable beads, NEEDLE evaluates nine strands in waterfall order:
 
 | # | Strand | Always On? | Purpose |
 |---|--------|-----------|---------|
@@ -72,9 +72,11 @@ When the primary workspace has no claimable beads, NEEDLE evaluates seven strand
 | 4 | Weave | Opt-in (24h cooldown) | Create new beads from documentation gaps. |
 | 5 | Unravel | Opt-in (7-day cooldown) | Propose alternatives for HUMAN-blocked beads. |
 | 6 | Pulse | Opt-in (48h cooldown) | Codebase health scans, auto-generate beads. |
-| 7 | Knot | Yes | All strands exhausted. Alert human. Wait. |
+| 7 | Reflect | Opt-in (24h cooldown, 10 beads min) | Learning consolidation: reads closed bead retrospectives, merges into `learnings.md`, promotes high-confidence learnings to skill files. |
+| 8 | Splice | Opt-in | Failure documentation: scans for dead workers, creates failure report beads for undocumented crashes, detects looping workers. |
+| 9 | Knot | Yes | All strands exhausted. Alert human. Wait. |
 
-> ⚠️ **For a first implementation, start with Pluck → Explore → Mend → Knot only.** Weave, Pulse, and Unravel have historically caused the most operational problems. Enable them only after the core loop is stable for at least a week.
+> ⚠️ **For a first implementation, start with Pluck → Explore → Mend → Knot only.** Weave, Pulse, Unravel, Reflect, and Splice are all opt-in. Enable them only after the core loop is stable for at least a week. Reflect is the most valuable opt-in strand once the core is stable — it continuously improves worker quality by consolidating learnings.
 
 ---
 
@@ -111,6 +113,34 @@ This is the core of the v2 guide. The two systems are not alternatives — they 
 - Bulk repetitive work (add logging to 47 handlers, write tests for every untested endpoint)
 - Cross-repo implementation tasks that are clearly specifiable
 - Long-running autonomous work sessions
+
+
+### spec2beads: Automating the plan.md → Beads Conversion
+
+The bridge step (converting `/orchestrate` plan.md output to beads) can be partially automated using [spec2beads](https://github.com/dcarmitage/spec2beads), a Claude Code skill that decomposes natural language specifications into INVEST-compliant, dependency-aware beads.
+
+Instead of manually running `bf create` for each plan.md checklist item, spec2beads reads the plan and generates ready-to-run `br create` commands with:
+- Correct bead types (epic, feature, task, spike, bug, chore)
+- Priority levels (P0–P4)
+- Acceptance criteria
+- Dependency DAG (`br dep add` commands)
+- Human-labeled beads for decisions requiring judgment
+
+**Install in Claude Code:**
+```bash
+# spec2beads is a Claude Code skill
+cd ~/.claude/skills
+git clone https://github.com/dcarmitage/spec2beads.git
+```
+
+**Usage in your workflow:**
+```
+# In Claude Code, after /orchestrate produces plan.md:
+/spec2beads decompose ~/.kiro/memory/features/my-feature/plan.md
+# Outputs executable br create commands — review, then run
+```
+
+This is particularly valuable for the MAC.BID multi-repo setup where a single feature may need beads across API, nextwebsite, and mobile-app repos simultaneously.
 
 ### The Handoff Point: plan.md → Beads
 
@@ -303,7 +333,7 @@ For your setup, `claude-interactive` is recommended — keeps workers on subscri
 ```bash
 python3 --version    # must be 3.10+
 pip install pyte
-gh release download v0.2.6 --repo jedarden/NEEDLE --pattern 'claude-interactive*'
+gh release download v0.2.7 --repo jedarden/NEEDLE --pattern 'claude-interactive*'
 ./claude-interactive-install.sh
 ```
 
@@ -385,6 +415,8 @@ strands:
   weave:   { enabled: false }    # enable only after core is stable
   unravel: { enabled: false }
   pulse:   { enabled: false }
+  reflect: { enabled: false }    # enable after 10+ beads closed — consolidates learnings
+  splice:  { enabled: false }    # enable once fleet is running — documents worker failures
 
 telemetry:
   otlp_sink:
@@ -579,6 +611,7 @@ All solved by `bf claim` (atomic `BEGIN IMMEDIATE` transaction). Use `bf claim -
 If you use NEEDLE to work on your own tooling/config repos:
 - Never auto-deploy changes to the NEEDLE binary without human approval
 - Weave strand on config repos must have a hard bead-creation bound
+- Reflect strand is read-only on CLAUDE.md — safe to enable on any repo; it only writes to `learnings.md` and `.beads/skills/`
 - Pin workers to a specific version when they're working on the orchestration layer itself
 
 ---
@@ -798,6 +831,6 @@ jobs:
 
 ---
 
-*NEEDLE v0.2.6 · MIT License · github.com/jedarden/NEEDLE*
+*NEEDLE v0.2.7 · MIT License · github.com/jedarden/NEEDLE*
 *kiro-config · github.com/LutherCalvinRiggs/kiro-config*
 *gstack · github.com/garrytan/gstack*
