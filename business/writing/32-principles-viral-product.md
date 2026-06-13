@@ -75,10 +75,3 @@ Several principles pull against each other in practice:
 - The "hero section only" principle (#20) works for simple products. For MAC.BID's complexity (auctions, bidding, payments, shipping), how do you compress a multi-dimensional product into a single-screen pitch?
 - No mention of SEO, content marketing, or community-led growth — Marc's frame is entirely landing page and launch-day virality. Does this reflect a deliberate scope limitation or a blind spot?
 
-## Most Directly Applicable to MAC.BID
-
-- **#3** (numbers over adjectives) — "Discounted overstock" is generic. "Products up to 90% off retail, new arrivals daily" is specific.
-- **#9** (copy only you could write) — the auction mechanics, the bidding tension, the overstock sourcing story are uniquely yours. Write from that experience.
-- **#20** (sellable from hero alone) — the hero needs to communicate: what it is, why the price is real, and what to do next — all before scrolling.
-- **#21** (empathy before selling) — the problem MAC.BID solves is paying retail for things that exist at discount. Name that frustration before explaining the solution.
-- **#28** (CTA says what happens next) — "Start Bidding" or "See Today's Deals" beats "Get Started."
