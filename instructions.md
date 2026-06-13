@@ -120,6 +120,14 @@ Produce a Markdown document with this exact structure:
 ```
 
 Tone: clear, curious, early-college level. No jargon unless defined above.
+## Scope Rule
+
+Notes must be **generic and broadly applicable**. Do not include company-specific analysis, product-specific applications, or references to specific businesses the user works with.
+
+Research is saved as reusable knowledge. Application to specific products or companies happens in a separate working session, not in the notes themselves.
+
+If a source contains a worked example tied to a specific company, generalize it or omit it. If the user asks for company-specific notes, write the generic version and note that application can be discussed separately.
+
 
 ---
 
