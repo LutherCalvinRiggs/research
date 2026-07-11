@@ -4,7 +4,7 @@
 **Saved:** 2026-07-11
 **Tags:** finance, business, economics, fundamentals, technology
 
-> ⚠️ Partial content — Sections 1, 2, and 3 captured. Still missing: specific industry examples, provider architecture, implementation details.
+> ⚠️ Partial content — Sections 1–4 (Step 1) captured. Still missing: Steps 2 and 3 of the three-step framework, provider architecture, specific company examples.
 
 ---
 
@@ -163,6 +163,50 @@ The providers who crack the adoption constraint for low-margin, labour-heavy bus
 - Intercept and automate coordination workflows at the infrastructure layer
 - Produce margin improvement without requiring new behaviour from the existing workforce
 - Deliver value in the P&L before any behaviour change occurs
+
+
+---
+
+## Section 4: Three Steps to Solve the Trillion-Dollar Challenge
+
+### Step 1 — Find the Hidden Coordination Cost
+
+**The narrow framing to avoid:** Most AI cost-saving conversations start with "replace a task, reduce headcount, or make an employee faster." That may happen eventually, but it misses the immediate, larger opportunity.
+
+**The broader framing:** The opportunity is the *work behind the work* — the overhead required to keep messy human operations moving.
+
+```
+Frontline employee executes the task
+                    ↕
+Coordination layer keeps it moving:
+  - Managers and supervisors
+  - Operations teams
+  - Dispatch and routing
+  - Customer updates
+  - Claims, invoices, exceptions
+  - Back-office reconciliation
+  - Finance and analytics teams
+```
+
+**Why the coordination layer is so large:** Human work is inherently messier than AI. Humans make judgment calls differently; each person carries their own context of the company and the task. The coordination layer exists to absorb that variability — to ensure work routes correctly, exceptions get handled, and information flows between people who each hold different pieces of the picture. Over time, this becomes a massive, load-bearing operating cost.
+
+**Real example (logistics company):**
+- Visible labour cost: the drivers
+- Hidden coordination cost: dispatch teams, routing changes, customer updates, claims, invoices, exceptions, back-office reconciliation
+- That coordination overhead: **~10% of revenue**
+- That spend became the transformation target
+
+**The pattern generalises across industries:**
+- Logistics
+- Manufacturing
+- Facilities management
+- Field services
+- Staffing
+- Healthcare clinics
+
+In every case: labour-heavy, hard-to-differentiate service, limited pricing power, large coordination overhead keeping the operation reliable. The coordination layer is not a bug — it's what makes the service work. But it's also the cost that AI can attack without touching the frontline execution.
+
+**The structural trap in one sentence:** These companies cannot raise prices to escape. Their margins stay compressed because they need a large coordination layer to deliver a commoditised service reliably — and until now, that coordination layer was not reducible without degrading service quality.
 
 ## Questions & Gaps
 - Section 2 provides the precise math (10% coordination cost reduction → 20% earnings improvement at 3% margins). The next question is documented real-world examples — which specific companies have achieved this, and over what timeframe?
