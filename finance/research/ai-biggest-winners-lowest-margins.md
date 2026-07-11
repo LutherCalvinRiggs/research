@@ -4,7 +4,7 @@
 **Saved:** 2026-07-11
 **Tags:** finance, business, economics, fundamentals, technology
 
-> ⚠️ Partial content — Sections 1–4 (Steps 1 and 2) captured. Still missing: Step 3, provider architecture, specific company examples.
+> **Source clarification:** Written by or on behalf of Varick Agents (varickagents.com), a consultancy selling AI transformation to low-margin businesses. The analytical framework is well-argued; claimed client results are self-reported. Read the thesis critically.
 
 ---
 
@@ -55,7 +55,7 @@ The window between "first mover captures the gain" and "efficiency spreads to th
 
 ## The Provider Opportunity
 
-"The providers who solve this will build billion-dollar companies — and the businesses they transform will be the ones that escape the margin trap first."
+"The providers who solve this will build billion-dollar companies. The key insight: the solution is AI sold as *infrastructure* (changes the operating layer underneath employees) rather than software (asks employees to adopt a new tool). Claimed results: 8-figure margin uplifts in manufacturing and logistics."
 
 This implies a two-sided opportunity:
 - **Operators**: Low-margin businesses that move first capture structural margin improvement
@@ -244,6 +244,72 @@ This means: no new interface. No behaviour change. The system intercepts the coo
 | Requires training and change management | Runs in existing workflow |
 | Value realised through adoption | Value realised regardless of adoption |
 | Fails in non-technical workforces | Works in any workforce |
+
+
+### Step 3 — Embed AI at the Infrastructure Level
+
+**The key finding from real deployments:**
+
+The best AI deployments make agents part of the *operating layer* of the company — not a tool on top of it.
+
+**What "infrastructure level" means in practice:**
+
+If accounts payable runs through NetSuite, email, PDFs, and spreadsheets — the agent runs across NetSuite, email, PDFs, and spreadsheets. It doesn't ask employees to move to a new system. It operates inside the systems they already use.
+
+**The AP example (a concrete workflow):**
+```
+Agent intercepts existing AP workflow:
+  1. Extracts invoice (from email, PDF, or ERP)
+  2. Matches to purchase order
+  3. Flags the exception (if mismatch)
+  4. Prepares the approval (if within rules)
+  5. Routes to a human ONLY when judgment is needed
+  6. Learns from approval feedback → refines itself over time
+
+Value realised: without employee adopting anything new
+```
+
+**The million-dollar lesson:**
+
+> "In order to engineer value from AI into a business, you need to sell AI as infrastructure."
+
+| Software | Infrastructure |
+|----------|---------------|
+| Asks the employee to adopt a tool | Changes the operating layer underneath the employee |
+| Value depends on daily usage | Value is engineered in — doesn't depend on anyone remembering |
+| Fails if adoption fails | Runs regardless |
+
+**The human control layer (what doesn't go away):**
+- Process owner can pause the workflow
+- Process owner can change a rule
+- Humans approve exceptions
+- Humans can be pulled back in when needed
+
+The employee still knows what happened. The process owner still controls the system. But the value is not contingent on the employee using the AI every day.
+
+---
+
+## The Conclusion: Why Low-Margin Businesses Are the Biggest AI Opportunity
+
+Three reasons converge:
+
+1. **Strongest economic incentive** — small margin improvements create massive profit increases (the 3% margin / 20% earnings math)
+2. **Right cost structure** — large labour and coordination-heavy cost bases that AI is uniquely suited to reduce
+3. **Competitive leverage** — in commoditized industries, even slight efficiency advantages change competitive position permanently
+
+**Why the market has missed this:**
+
+The market focused on software companies, tech-forward enterprises, and knowledge workers because those companies adopt tools faster and have budgets to experiment. The largest profit impact may come from the businesses least likely to describe themselves as AI companies.
+
+**The closing thesis in one paragraph:**
+
+These are not obvious AI winners because they don't look like AI companies from the outside. Their margins are thin because their operations are heavy. Their operations are heavy because labour has to be coordinated. And AI is the first technology that can remove a meaningful amount of that coordination work *without requiring the entire workforce to change how it works.*
+
+> "The next wave of AI winners will come from putting agents behind the workflows of low-margin businesses and letting the savings show up quietly in the operating model."
+
+**Claimed results:** 8-figure margin uplifts for manufacturing and logistics clients (self-reported by Varick Agents, the firm behind the article — varickagents.com).
+
+> ⚠️ **Editorial note:** The article is authored by or on behalf of Varick Agents, a consultancy selling AI transformation services to low-margin businesses. The framework is analytically sound but the claimed results ("8-figure margin uplifts") are self-reported marketing. The thesis is worth taking seriously; the specific numbers warrant independent verification.
 
 ## Questions & Gaps
 - Section 2 provides the precise math (10% coordination cost reduction → 20% earnings improvement at 3% margins). The next question is documented real-world examples — which specific companies have achieved this, and over what timeframe?
