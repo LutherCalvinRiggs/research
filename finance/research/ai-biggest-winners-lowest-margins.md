@@ -4,7 +4,7 @@
 **Saved:** 2026-07-11
 **Tags:** finance, business, economics, fundamentals, technology
 
-> ⚠️ Partial content — Sections 1–4 (Step 1) captured. Still missing: Steps 2 and 3 of the three-step framework, provider architecture, specific company examples.
+> ⚠️ Partial content — Sections 1–4 (Steps 1 and 2) captured. Still missing: Step 3, provider architecture, specific company examples.
 
 ---
 
@@ -208,13 +208,50 @@ In every case: labour-heavy, hard-to-differentiate service, limited pricing powe
 
 **The structural trap in one sentence:** These companies cannot raise prices to escape. Their margins stay compressed because they need a large coordination layer to deliver a commoditised service reliably — and until now, that coordination layer was not reducible without degrading service quality.
 
+
+### Step 2 — Remove Employee Adoption as a Bottleneck
+
+**The problem with every enterprise AI product built so far:**
+
+Standard AI tools add a step. They ask employees to:
+1. Open a new interface
+2. Remember when to use it
+3. Decide which tasks it applies to
+4. Use it
+5. Translate the output back into the workflow they were already doing
+
+This turns AI into *another place work has to happen* — an additional burden layered on top of existing work, not a system that removes work.
+
+**Why adoption fails (the real reason):**
+
+Employees don't want a better tool to help them do the work. They want the work to be done.
+
+The distinction is precise: a copilot makes the employee faster at the task. The right solution makes the task unnecessary. These are not the same product.
+
+**The design principle for low-margin businesses:**
+
+> "The ideal solution is not a better interface for employees to use, but a system that runs inside the existing workflow and removes the need for most of that interaction in the first place."
+
+This means: no new interface. No behaviour change. The system intercepts the coordination layer at the infrastructure level — in the data flows, the systems of record, the communication channels already in use — and handles the work before it ever reaches a human.
+
+**The product architecture implication:**
+
+| Standard enterprise AI | Low-margin AI (the right design) |
+|------------------------|----------------------------------|
+| New dashboard / copilot | No new interface |
+| Employee-initiated | System-initiated |
+| Helps employee do the work faster | Removes the work entirely |
+| Requires training and change management | Runs in existing workflow |
+| Value realised through adoption | Value realised regardless of adoption |
+| Fails in non-technical workforces | Works in any workforce |
+
 ## Questions & Gaps
 - Section 2 provides the precise math (10% coordination cost reduction → 20% earnings improvement at 3% margins). The next question is documented real-world examples — which specific companies have achieved this, and over what timeframe?
 - Section 2 defines coordination costs as scheduling, dispatch, approvals, exception handling, and administrative loops — roughly 25% of labour spend / 6% of revenue. The remaining gap is industry-specific breakdown: what coordination looks like in trucking vs. staffing vs. field services.
 - The first-mover window: how long does it typically last in industries this commoditized? Historical analogies from prior technology waves (GPS routing in trucking, ERPs in manufacturing) would be useful anchors.
 - The provider framing raises a classic B2B dilemma: low-margin businesses are price-sensitive buyers. How do vertical AI providers price solutions such that the customer keeps enough of the margin improvement to justify the purchase?
 - Which specific companies are already playing this game today? The article promises to name them but the excerpt ends before reaching that section.
-- The "no new interaction surface" design constraint is the key product insight. What does this actually look like technically — API-layer integrations, workflow interception, RPA hybrids? Section 3 names the constraint but not the architecture.
+- Step 2 sharpens the design constraint: "runs inside the existing workflow, removes the need for most interaction." Still missing: what does this look like technically? API-layer interception, workflow automation, system-of-record integration? Step 3 may provide the architecture.
 
 ## Related Notes
 - [AI Company Analysis Forensic Screener](https://github.com/LutherCalvinRiggs/research/blob/main/finance/research/ai-company-analysis-forensic-screener.md) — the Piotroski F-Score (is this company getting financially stronger?) and Altman Z-Score (bankruptcy risk) are directly applicable to identifying which low-margin operators are executing the AI transformation vs. which are deteriorating.
