@@ -4,12 +4,12 @@
 **Saved:** 2026-07-11
 **Tags:** finance, business, economics, fundamentals, technology
 
-> ⚠️ Partial content — only Section 1 was available at time of saving. Notes cover the core thesis and opening argument. Additional sections (coordination costs, specific industry examples, the "providers who solve this" framing) are referenced but not yet captured.
+> ⚠️ Partial content — Sections 1 and 2 captured. Still missing: specific industry examples, the provider opportunity in depth, risk and implementation challenges.
 
 ---
 
 ## TL;DR
-The biggest AI winners may not be software companies or AI labs — they may be low-margin businesses like manufacturers, trucking carriers, distributors, staffing agencies, and field-service operators that have run on single-digit margins for decades. For a business at 30% margins, AI efficiency gains barely move the needle. For a business at 3% margins, a sub-1% cost reduction can produce a 25%+ profit increase. AI gives these businesses a way to attack coordination costs that were previously treated as permanent structural constraints — and early movers bank the earnings uplift before competitors force it back into lower prices.
+The biggest AI winners may not be software companies or AI labs — they may be low-margin businesses like manufacturers, trucking carriers, distributors, staffing agencies, and field-service operators that have run on single-digit margins for decades. For a business at 30% margins, AI efficiency gains barely move the needle. For a business at 3% margins, a sub-1% cost reduction can produce a 25%+ profit increase. AI gives these businesses a way to attack coordination costs (scheduling, dispatch, approvals, exception handling — ~6% of revenue, ~25% of labour spend) that were previously treated as permanent structural constraints — and early movers bank the earnings uplift before competitors force it back into lower prices.
 
 ---
 
@@ -72,9 +72,68 @@ The excerpt ends at the end of Section 1. Missing sections likely include:
 - **The "providers who solve this"** framing — what the right product architecture looks like for vertical AI in low-margin industries
 - **Risk and implementation challenges** — why most low-margin businesses haven't moved yet (budget constraints, tech debt, change management)
 
+
+---
+
+## Section 2: The Structural Barriers (and the Coordination Cost Opportunity)
+
+### Why Low-Margin Businesses Are Trapped
+
+Three interlocking constraints keep these companies structurally thin:
+
+1. **Commoditized markets** — they cannot move the market price; the market sets it. Cost is the only lever they control.
+2. **Limited pricing power** — any efficiency gain that spreads to competitors gets competed away into lower prices for buyers.
+3. **Large, sticky operating cost bases** — previously impossible to reduce without hurting service quality.
+
+### The Labour Cost Anatomy
+
+In labour-intensive, low-margin businesses:
+
+| Cost layer | % of revenue |
+|-----------|-------------|
+| Total labour cost | ~25% of revenue |
+| Of which: coordination labour (managing, coordinating, administering) | ~6% of revenue (~25% of labour spend) |
+
+The physical work itself is one cost. The cost of *coordinating* that work — scheduling, dispatching, approvals, exception handling, administrative loops — is a separate, largely hidden burden on top.
+
+### The Coordination Cost Thesis (The Precise Opportunity)
+
+Coordination work is where AI has the clearest opportunity:
+
+- Scheduling and dispatch
+- Approval workflows
+- Exception handling
+- Administrative loops
+
+These are not the physical jobs. They are the management layer around the physical jobs — and they consume roughly a quarter of the total labour budget.
+
+### The Precise Math
+
+```
+Company operating at 3% net margin
+Labour = 25% of revenue
+Coordination labour = 6% of revenue (25% of labour spend)
+
+Ease coordination burden by 10%:
+  → Save 0.6% of revenue in coordination costs
+  → On a 3% margin base: +0.6% / 3% = +20% earnings improvement
+```
+
+A 10% reduction in coordination overhead — not total labour, just the coordination fraction — produces a 20% earnings improvement for a 3% margin business. This is not incremental optimization. It restructures the entire earnings profile.
+
+### The Structural Advantage Window
+
+The first-mover dynamic in more detail:
+
+- Early adopters capture the coordination cost reduction as margin *before* competitors move
+- When competitors adopt, the efficiency advantage gets competed into lower prices — the coordination saving becomes a customer subsidy
+- But the early mover has already: (a) banked multiple years of elevated earnings, (b) used that capital to invest in further advantages, (c) reset their cost structure permanently below the pre-AI baseline
+
+AI does not just make these businesses slightly more efficient. It gives early adopters "a chance to open a structural cost advantage over their competitors — and to run as a genuinely higher-margin business, perhaps for the first time."
+
 ## Questions & Gaps
-- The <1% cost reduction → >25% profit increase math is illustrative. What are the actual documented examples of low-margin businesses that have achieved this via AI? The claim needs grounding in specific cases.
-- "Coordination costs" is the named problem but not yet defined in the excerpt. What specifically counts as coordination cost vs. operational cost in trucking, staffing, or distribution?
+- Section 2 provides the precise math (10% coordination cost reduction → 20% earnings improvement at 3% margins). The next question is documented real-world examples — which specific companies have achieved this, and over what timeframe?
+- Section 2 defines coordination costs as scheduling, dispatch, approvals, exception handling, and administrative loops — roughly 25% of labour spend / 6% of revenue. The remaining gap is industry-specific breakdown: what coordination looks like in trucking vs. staffing vs. field services.
 - The first-mover window: how long does it typically last in industries this commoditized? Historical analogies from prior technology waves (GPS routing in trucking, ERPs in manufacturing) would be useful anchors.
 - The provider framing raises a classic B2B dilemma: low-margin businesses are price-sensitive buyers. How do vertical AI providers price solutions such that the customer keeps enough of the margin improvement to justify the purchase?
 - Which specific companies are already playing this game today? The article promises to name them but the excerpt ends before reaching that section.
