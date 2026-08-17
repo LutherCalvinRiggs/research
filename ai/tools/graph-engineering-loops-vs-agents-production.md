@@ -219,6 +219,114 @@ The shift in perspective is real. Three things have converged: models strong eno
 
 ---
 
+
+---
+
+## Visual Slides Reference (from video screenshots)
+
+### Slide 1 — G = (V, E, S, P) Diagram
+The formal graph definition visualized as a running system:
+- **Planner node** (top) with dashed Policy edge → Routing/Strategy
+- **Research node** (Search, Retrieve, Analyze) and **Tool Call node** (APIs, Functions, Tools) in parallel below
+- Both feed into **Shared State** (Memory, Context, Data)
+- **Executor node** (bottom) receives from Shared State
+
+Legend: solid arrows = Flow/Transition, filled dots = Node (Vertex), database icon = Shared State, dashed orange = Policy/Strategy
+
+### Slide 2 — Diamond Topology (Fan-out / Fan-in)
+Input → 4 parallel branches (A, B, C, D) → Merge/Synthesize → Result. Chinese label: 菱形：拆分 → 并行 → 合并 (扇出扇入) = "Diamond: split → parallel → merge (fan-out/fan-in)"
+
+### Slide 3 — Multi-Agent Research System (from Anthropic/Claude.ai)
+Concrete production architecture:
+- **Lead agent (orchestrator)** with tools: search tools + MCP tools + memory + run_subagent + complete_task
+- **Citations subagent** (left) — processes user request
+- **3× Search subagents** (bottom) — each with self-loop (can search multiple times)
+- **Memory** (right) — bi-directional with lead agent
+- User request enters through Citations subagent; Final Report exits through it
+- Example task: "list 100 US AI agent companies with name, website, description, type, industry"
+
+### Slide 4 — Pipeline with Checkpoint Gate
+Write outline → Checkpoint gate (outline must pass; blocked if not) → Write body → Deliver
+Chinese: 大纲不合格就卡住，不放行到下一步 = "If outline fails, block; don't let through to next step"
+This is the pipeline topology with a deterministic gate at step 2.
+
+### Slide 5 — Routing Workflow (from Anthropic docs)
+In → LLM Call Router → (dotted edges to) LLM Call 1 / LLM Call 2 / LLM Call 3 → Out
+"Routing classifies an input and directs it to a specialized followup task. Without this workflow, optimizing for one kind of input can hurt performance on other inputs."
+
+### Slide 6 — Evaluator-Optimizer Workflow (from Anthropic docs)
+In → LLM Call Generator ↔ LLM Call Evaluator → Out (Accepted)
+Loop: Solution (Generator → Evaluator) / Rejected + Feedback (Evaluator → Generator)
+"In the evaluator-optimizer workflow, one LLM call generates a response while another provides evaluation and feedback in a loop."
+
+### Slide 7 — When (and when not) to use agents (from Anthropic docs)
+Direct quote visible: "When building applications with LLMs, we recommend finding the simplest solution possible, and only increasing complexity when needed. This might mean not building agentic systems at all. Agentic systems often trade latency and cost for better task performance, and you should consider when this tradeoff makes sense."
+"When more complexity is warranted, workflows offer predictability and consistency for well-defined tasks, whereas agents are the better option when flexibility and model-driven decision-making are needed at scale. For many applications, however, optimizing single LLM calls with retrieval and in-context examples is usually enough."
+
+### Slide 8 — When and how to use frameworks (from Anthropic docs)
+Frameworks listed: Claude Agent SDK, Strands Agents SDK by AWS, Rivet (drag-and-drop GUI LLM workflow builder), Vellum (GUI tool for building and testing complex workflows)
+"These frameworks make it easy to get started by simplifying standard low-level tasks like calling LLMs, defining and parsing tools, and chaining calls together. However, they often create extra layers of abstraction that can obscure the underlying prompts and responses, making them harder to debug. They can also make it tempting to add complexity when a simpler setup would suffice."
+
+### Slide 9 — Three Validation Patterns (visual)
+**Left — Adversarial (对抗式):** N skeptics independently refute the same conclusion; valid only if majority fail to refute
+**Center — Multi-perspective (多视角):** Check correctness (正确性), security (安全性), reproducibility (能否复现), other perspectives (其他视角) — each independently
+**Right — Jury system (评委制):** Solutions A/B/C/D run in parallel, judges 1-N score each (e.g., 8.5, 9.2, 7.8, 8.0), winner selected (Solution B: 9.2), best elements from runner-up absorbed
+
+### Slide 10 & 11 — Loop vs. Graph Side-by-Side (the briefing example)
+**Left — "Bloated Loop" (做法一·一个臃肿的 Loop):**
+Single agent does: search (one source at a time) + write + review. Context gets dirtier with each iteration. Author reviews their own draft. Sequential, slow.
+Bottom note: 上下文越滚越脏 = "Context gets dirtier and dirtier" (original web pages + half-finished work + own reasoning; author grading their own paper; sequential = slow)
+
+**Right — "Three-node graph" (做法二·一张三节点小图):**
+多信源 (multiple sources) → 研究员 (Researcher: fan-out parallel search) → 笔记 (notes) → 写作 (Writer: sees only clean notes) → 草稿 (draft) → 审稿 (Reviewer: completely fresh context) → 过 (pass) → 发到邮箱 (send to inbox)
+Fail path: 不过，打回 = "not passed, sent back" (reviewer sends back to writer)
+
+### Slide 12 — The Three Data Points (from Anthropic)
+| Data | Meaning |
+|------|---------|
+| 90.2% | Multi-agent research system outperformed single-agent by this margin in internal evaluation |
+| 15× | Multi-agent system token consumption vs. standard conversation |
+| 80% | Token usage alone explains 80% of the performance difference |
+
+### Slide 13 — Three Scenarios for Multi-Agent (适合使用多智能体的三大场景)
+**1. Context Protection (上下文保护):** Subtask generates >1000 tokens of irrelevant info; use independent subagent to isolate, keeping main context clean. Main agent delegates task → subagent handles large info in isolated context → returns refined results only.
+
+**2. Parallelizable (可并行):** Task splits into independent branches running simultaneously; main agent (task planning) fans out to subagents A/B/C/D each doing parallel independent searches → results merge/deduplicate/verify → final answer/report
+
+**3. Specialization (专业化):** Different steps need different tools, prompts, focus. Researcher (search engine, web scraping, document DB) + Analyst (data analysis, visualization, calculator) + Writer (writing tools, template library, style check) + Reviewer (fact check, rule validation, safety check) → integrated high-quality output
+
+### Slide 14 — Framework Token Comparison Table
+| Framework | Orchestration model | State management | Tokens/task | Best for |
+|-----------|--------------------|--------------------|-------------|---------|
+| **LangGraph** (LangChain) | Directed graph + conditional edges | Built-in checkpoints + time travel | ~2,000 | Long-running, needs audit/rollback, production pipelines |
+| **CrewAI** | Role-based crews | Sequential task output passing | ~3,500 | Standardized role-based division of labor |
+| **AutoGen** (Microsoft) | Conversational GroupChat | Conversation history as primary | ~8,000 | Exploratory multimodal dialogue coordination |
+| **Google ADK** | Structured graph architecture | Hierarchical coordination + A2A protocol | — | Code-first, enterprise-grade, deploys to Vertex AI |
+
+**Key insight from the token numbers:** LangGraph (~2,000) vs. AutoGen (~8,000) for the same task — 4× difference. The graph structure turns agent dialogue into state transitions, eliminating redundant context-restating between agents. This is why LangGraph became the de facto enterprise production standard.
+
+### Slide 15 — LangGraph Checkpointers (from LangGraph docs)
+"A checkpointer saves a snapshot of graph state at each super-step, organized into threads. Compile a graph with a checkpointer to enable human-in-the-loop workflows, time travel debugging, fault-tolerant execution, and conversational memory."
+
+**Hierarchy:**
+- **Graph** — control flow of nodes, edges
+- **Super-steps** — each sequential node is a separate super-step; parallel nodes share the same super-step
+- **Checkpoints** — state and relevant metadata packaged at every super-step
+- **Thread** — collection of checkpoints
+- **StateSnapshot** — the type for checkpoints
+
+**Note:** When using the Agent Server, checkpointing is handled automatically — no manual implementation needed.
+Trace checkpointed state and debug with LangSmith.
+
+### Slide 16 — Three-Generation Evolution: Old Workflow → ReAct → Graph
+**① Old workflow (老工作流，全程预先写死):** A(fixed) → B(fixed) → C(fixed). "Stable but rigid, can't bend."
+
+**② ReAct (全程临场发挥):** Think → Act → Observe loop. "Flexible, but hard to reproduce, hard to audit, prone to losing control."
+
+**③ Graph (结构预定，节点内自主):** Node1(internally autonomous) → Node2(internally autonomous). "Edges and structure fixed = governable; nodes internally autonomous = flexible enough. Both at once."
+
+This is the clearest visual statement of the graph's core design principle: **fixed edges for governance, autonomous nodes for flexibility.**
+
 ## Questions & Gaps
 - The "15× token consumption" figure for multi-agent vs. single-agent — is this specific to Anthropic's internal research system or generalizable? Context matters enormously.
 - LangGraph's time-travel debugging sounds powerful but the implementation cost seems high. What does a "superstep checkpoint" look like in practice, and how does this interact with external side effects (database writes, API calls) that already happened before the checkpoint?
